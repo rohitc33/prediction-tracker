@@ -561,7 +561,7 @@ function calibrationHTML(preds) {
   return rows.map(r => `
     <div class="calib-row" style="opacity:${r.n && r.n < SHOW_N ? .55 : 1}">
       <div>${r.label}</div>
-      <div class="calib-bar" title="${r.n ? `You said ~${Math.round(r.expected)}% and were right ${Math.round(r.actual)}% of the time (${r.n} predictions). A perfectly calibrated forecaster would usually land between ${Math.round(r.luck[0])}% and ${Math.round(r.luck[1])}%.` : 'No data'}">
+      <div class="calib-bar" title="${r.n ? `You said ~${Math.round(r.expected)}% and were right ${Math.round(r.actual)}% of the time (${r.n} predictions). If your probabilities were exactly right, chance alone would usually put you between ${Math.round(r.luck[0])}% and ${Math.round(r.luck[1])}%.` : 'No data'}">
         ${r.n ? `<div class="fill" style="width:${r.actual}%"></div>
           <div class="luck" style="left:${r.luck[0]}%;width:${r.luck[1] - r.luck[0]}%"></div>
           <div class="target" style="left:calc(${r.expected}% - 1px)"></div>` : ''}
@@ -762,18 +762,20 @@ const METRICS = {
     fmt: fmtPts,
     rows: d => [
       ['Lean', overconfWord(d.s.overconf) || '—'],
-      ['Luck alone', `~${Math.round(d.luck.typical)} pts, up to ${Math.round(d.luck.high)}`],
-      ['Verdict', d.s.calErr > d.luck.high ? '<b class="out">More than luck explains</b>' : 'Within what luck alone produces'],
+      ['By chance alone', `~${Math.round(d.luck.typical)} pts, rarely over ${Math.round(d.luck.high)}`],
+      ['Verdict', d.s.calErr > d.luck.high ? '<b class="out">More than chance explains</b>' : 'Within what chance produces'],
     ],
-    about: 'How far your probabilities are from what actually happens, in points. “Luck alone” is what a perfectly calibrated forecaster making your exact predictions would typically score; only values beyond its upper end are good evidence of real miscalibration.',
+    about: d => `How far your probabilities are from how often things actually happen, in points. Even if your probabilities were exactly right, ${d.s.n} predictions would typically show about ${Math.round(d.luck.typical)} pts just by chance, and rarely more than ${Math.round(d.luck.high)}. ${d.s.calErr > d.luck.high
+      ? `Yours is higher than that, so you’re probably genuinely ${d.s.overconf > 0 ? 'overconfident' : 'underconfident'}.`
+      : 'Yours is within that, so there’s no clear sign of miscalibration yet.'}`,
   },
   resolution: {
     label: 'Resolution',
     value: d => fmtPct(d.s.resolution),
-    short: d => d.s.resolution == null ? 'needs both outcomes' : 'of the maximum',
+    short: d => d.s.resolution == null ? 'needs both outcomes' : 'of a perfect split',
     fmt: fmtPct,
     rows: () => [],
-    about: 'How well your probabilities separate what happens from what doesn’t, as a share of the most that’s possible. 0% = no information beyond the base rate. With few predictions this reads too high, because the fit can separate a handful of outcomes by luck.',
+    about: 'Do the things you give higher odds to actually happen more often? 100% = everything that happened got a higher probability than everything that didn’t. 0% = your odds didn’t line up with outcomes at all. This only checks the order of your probabilities; whether the numbers themselves are right is what calibration error measures. With few predictions a perfect order can happen by luck, so this reads too high.',
   },
   dirBias: {
     label: 'Direction bias',
@@ -818,8 +820,8 @@ function metricDialog(k) {
     <div class="muted" style="font-size:14px;margin-top:-8px">${scope}</div>
     ${d.low ? `<div class="lock-note">Only ${d.s.n} scored — this is mostly noise until about ${MIN_N}.</div>` : ''}
     <dl class="kv">${rows.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join('')}</dl>
-    <p class="muted" style="font-size:14px;margin:0">${m.about}</p>
-    <p class="muted" style="font-size:12.5px;margin:0">“Likely range” is a 90% bootstrap interval: how much this number could move by luck alone.</p>
+    <p class="muted" style="font-size:14px;margin:0">${typeof m.about === 'function' ? m.about(d) : m.about}</p>
+    <p class="muted" style="font-size:12.5px;margin:0">“Likely range”: with a different run of luck on the same predictions, this number would usually land somewhere in that range.</p>
   `, '<button type="button" class="btn primary" data-close2>Done</button>');
   $('[data-close2]', dlg).onclick = () => dlg.close();
 }
@@ -888,9 +890,9 @@ function helpHTML() {
     <dt>Probability</dt><dd>For each prediction you give the chance (1–99%) that it comes true. 30% means you lean “no”. Only predictions resolved as happened / didn’t are scored.</dd>
     <dt>Skill score</dt><dd>How much better your Brier score is than always guessing the category’s base rate (how often things in it actually happened). 0% = no better than that; 100% = perfect; negative = worse. Because it adjusts for how predictable a category is, it’s the fair way to compare categories.</dd>
     <dt>Brier score</dt><dd>Mean of (probability − outcome)², where outcome is 1 or 0. 0 is perfect; always saying 50% gets 0.25. It splits exactly into: calibration part − resolution part + uncertainty (how hard the category is).</dd>
-    <dt>Calibration error</dt><dd>The app finds the best “corrected” version of your probabilities: the curve that matches how often things actually happened, with the only rule being that a higher probability from you never maps to a lower corrected one (isotonic regression, the CORP method). Calibration error is how much Brier score you lose by not using those corrected probabilities, shown as a typical gap in points (the square root). 0 = your probabilities already mean what they say. The line below it says which way you tend to miss: overconfident or underconfident.<br><br>Even a perfectly calibrated forecaster shows some calibration error by chance, especially with few predictions. “Luck alone” simulates that forecaster making your exact predictions: the “~” figure is what they’d typically score, and “up to” is their 95th percentile. Only a calibration error beyond that is good evidence of real miscalibration.</dd>
-    <dt>Calibration chart</dt><dd>Predictions are grouped by your confidence in the side you picked (30% “yes” counts as 70% “no”). The bar is how often you were right; the tick is how confident you were. The shaded luck range is where a perfectly calibrated forecaster would land 90% of the time with the same predictions, so a bar ending inside it is consistent with luck. Faded rows have fewer than ${SHOW_N} predictions. The chart is a simplified view in fixed bands; the calibration error score uses the exact CORP method, so with few predictions the two can disagree slightly.</dd>
-    <dt>Resolution</dt><dd>How much the corrected probabilities improve on always guessing the base rate, as a share of the most that’s possible. 0% = your probabilities carry no information beyond the base rate; 100% = they perfectly separate what happens from what doesn’t. Brier = calibration part − resolution part + uncertainty, exactly.</dd>
+    <dt>Calibration error</dt><dd>The app finds the best “corrected” version of your probabilities: the curve that matches how often things actually happened, with the only rule being that a higher probability from you never maps to a lower corrected one (isotonic regression, the CORP method). Calibration error is how much Brier score you lose by not using those corrected probabilities, shown as a typical gap in points (the square root). 0 = your probabilities already mean what they say. The line below it says which way you tend to miss: overconfident or underconfident.<br><br>Even if your probabilities were exactly right, outcomes are random, so you’d still see some calibration error, just as 10 flips of a fair coin rarely give exactly 5 heads. “Within luck” / “beyond luck” compares your number with what chance alone would produce for your exact predictions (the app flips weighted coins for them 200 times and scores each run). Within luck means there’s no clear sign of miscalibration yet; beyond luck means the gap is probably real.</dd>
+    <dt>Calibration chart</dt><dd>Predictions are grouped by your confidence in the side you picked (30% “yes” counts as 70% “no”). The bar is how often you were right; the tick is how confident you were. The shaded luck range is where your bar would land 90% of the time by chance alone if your probabilities were exactly right, so a bar ending inside it could just be luck. Faded rows have fewer than ${SHOW_N} predictions. The chart is a simplified view in fixed bands; the calibration error score uses the exact CORP method, so with few predictions the two can disagree slightly.</dd>
+    <dt>Resolution</dt><dd>Do the things you give higher odds to actually happen more often? Line up your predictions from lowest to highest probability: 100% means everything that happened sits above everything that didn’t; 0% means your odds didn’t line up with outcomes at all (or ran backwards). It only checks the order; whether the numbers themselves are right is calibration error’s job. With few predictions a perfect order can happen by luck, so it reads too high.</dd>
     <dt>Direction bias</dt><dd>Your average probability minus how often things actually happened. +10 pts means things happen less often than you predict (e.g. optimism about your own plans); negative means more often.</dd>
     <dt>Hit rate</dt><dd>Share of predictions that went the way you leaned. Shown for reference only — it ignores how confident you were.</dd>
     <dt>Ranges and low data</dt><dd>The “90% range” under each number is a bootstrap estimate of how much it could move by luck alone. With fewer than ${MIN_N} scored predictions, numbers are greyed out and charts are dashed. With so little data, the corrected curve partly fits luck, so calibration error and resolution both tend to come out too high.</dd>
