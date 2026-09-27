@@ -4,12 +4,15 @@ A single-file, fully local web app for tracking how accurate your predictions ar
 Open `index.html` in any browser (phone or desktop). No server, no build step, and no network requests. All data lives in your browser's `localStorage`.
 
 ## Features
+- App-style layout with a bottom tab bar: **Home** (overall skill, predictions due to resolve, categories),
+  **Predictions** (filter by category and open/resolved), **+** (new prediction), **Scores** (per-category
+  scores and trends), **More** (manage categories, backup, erase)
 - Categories, each with its own predictions
 - Each prediction has a stated probability (1–99%), an optional resolve-by date and notes
 - Resolve a prediction with one tap (Happened / Didn't), or mark it Void to leave it out of scoring
 - Per-category and overall scores with 90% bootstrap ranges, plus trend charts and a calibration breakdown
 - Predictions lock 15 minutes after entry, so the record can't be revised with hindsight
-- Export and import a JSON backup (Menu → Export) to move data between devices
+- Export and import a JSON backup (More → Export) to move data between devices
 
 ## Metrics
 Each prediction has a probability `f` and, once resolved, an outcome `o` (1 = happened, 0 = didn't).

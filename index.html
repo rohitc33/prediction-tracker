@@ -26,6 +26,7 @@
     --grid: #e7e4dc;
     --shadow: 0 1px 2px rgba(0,0,0,.05), 0 4px 16px rgba(0,0,0,.04);
     --radius: 14px;
+    --tabbar-h: 60px;
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
@@ -54,7 +55,9 @@
     color: var(--text);
     font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
-    padding-bottom: calc(96px + env(safe-area-inset-bottom));
+    padding-bottom: calc(var(--tabbar-h) + 28px + env(safe-area-inset-bottom));
+    overscroll-behavior-y: none;
+    -webkit-tap-highlight-color: transparent;
   }
   button, input, select, textarea { font: inherit; color: inherit; }
   a { color: var(--accent); }
@@ -81,7 +84,7 @@
   .btn {
     border: 1px solid var(--border); background: var(--surface); border-radius: 10px;
     padding: 9px 14px; cursor: pointer; font-weight: 550; font-size: 15px;
-    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; color: inherit;
   }
   .btn:hover { background: var(--surface-2); }
   .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
@@ -91,13 +94,58 @@
   .btn.good { color: var(--good); }
   .btn.bad { color: var(--bad); }
 
-  .fab {
-    position: fixed; right: max(16px, calc(50vw - 364px)); bottom: calc(20px + env(safe-area-inset-bottom));
-    z-index: 6; border: 0; border-radius: 999px; padding: 14px 20px 14px 16px;
-    background: var(--accent); color: var(--accent-ink); font-weight: 650; font-size: 16px;
-    box-shadow: 0 6px 20px rgba(0,0,0,.18); cursor: pointer; display: flex; align-items: center; gap: 6px;
+  nav.tabbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
+    background: color-mix(in srgb, var(--surface) 90%, transparent);
+    backdrop-filter: saturate(1.4) blur(12px); -webkit-backdrop-filter: saturate(1.4) blur(12px);
+    border-top: 1px solid var(--border);
+    padding-bottom: env(safe-area-inset-bottom);
+    user-select: none; -webkit-user-select: none;
   }
-  .fab svg { width: 22px; height: 22px; }
+  .tabbar-inner { max-width: 560px; margin: 0 auto; display: grid; grid-template-columns: repeat(5, 1fr); height: var(--tabbar-h); }
+  .tab {
+    border: 0; background: none; cursor: pointer; text-decoration: none; color: var(--muted);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    font-size: 11px; font-weight: 600; padding: 0;
+  }
+  .tab svg { width: 24px; height: 24px; }
+  .tab.on { color: var(--accent); }
+  .add-circle {
+    width: 52px; height: 52px; border-radius: 50%; background: var(--accent); color: var(--accent-ink);
+    display: grid; place-items: center; margin-top: -18px; box-shadow: 0 4px 14px rgba(0,0,0,.2);
+    border: 4px solid var(--bg);
+  }
+  .add-circle svg { width: 26px; height: 26px; }
+  .tab-add:active .add-circle { transform: scale(.94); }
+
+  .chips { display: flex; gap: 8px; overflow-x: auto; margin: 0 -16px 12px; padding: 2px 16px; scrollbar-width: none; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip {
+    flex: none; border: 1px solid var(--border); background: var(--surface); border-radius: 999px;
+    padding: 7px 14px; font-size: 14px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 7px;
+  }
+  .chip.on { background: var(--text); color: var(--bg); border-color: transparent; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .seg.full { display: flex; margin-bottom: 12px; }
+  .seg.full button { flex: 1; }
+
+  .summary { display: block; text-decoration: none; color: inherit; }
+  .summary-top { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
+  .summary .label { font-size: 13px; color: var(--muted); }
+  .summary .big { font-size: 34px; font-weight: 750; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.15; }
+  .summary .big.low { color: var(--muted) !important; }
+  .summary .counts { font-size: 13px; color: var(--muted); text-align: right; }
+
+  .list { padding: 0; overflow: hidden; }
+  .list .row {
+    display: flex; width: 100%; align-items: center; gap: 12px; padding: 14px 16px; border: 0; background: none;
+    border-bottom: 1px solid var(--border); text-align: left; cursor: pointer; font-size: 16px; color: var(--text);
+  }
+  .list .row:last-child { border-bottom: 0; }
+  .list .row:active { background: var(--surface-2); }
+  .list .row.danger { color: var(--bad); }
+  .list .row .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .list .row svg { width: 18px; height: 18px; color: var(--muted); flex: none; }
 
   .card {
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
@@ -209,7 +257,7 @@
   .menu .btn { justify-content: flex-start; width: 100%; }
   .muted { color: var(--muted); }
   .toast {
-    position: fixed; left: 50%; bottom: calc(90px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+    position: fixed; left: 50%; bottom: calc(var(--tabbar-h) + 14px + env(safe-area-inset-bottom)); transform: translateX(-50%);
     background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 14px;
     z-index: 100; box-shadow: 0 6px 20px rgba(0,0,0,.2); max-width: calc(100vw - 32px);
     display: flex; gap: 14px; align-items: center;
@@ -223,10 +271,20 @@
 <body>
 <header class="top"><div class="top-inner" id="topbar"></div></header>
 <main id="app"></main>
-<button class="fab" id="fab" type="button">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-  <span id="fab-label">Prediction</span>
-</button>
+<nav class="tabbar" aria-label="Main">
+  <div class="tabbar-inner">
+    <a class="tab" data-tab="home" href="#/">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5L12 3l9 7.5"/><path d="M5 9.5V20h5v-6h4v6h5V9.5"/></svg><span>Home</span></a>
+    <a class="tab" data-tab="predictions" href="#/predictions">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/></svg><span>Predictions</span></a>
+    <button class="tab tab-add" type="button" data-act="add" aria-label="New prediction">
+      <span class="add-circle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span></button>
+    <a class="tab" data-tab="scores" href="#/scores">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span>Scores</span></a>
+    <a class="tab" data-tab="more" href="#/more">
+      <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg><span>More</span></a>
+  </div>
+</nav>
 <dialog id="dlg"></dialog>
 <input type="file" id="import-file" accept="application/json,.json" class="sr">
 
@@ -462,40 +520,162 @@ function calibrationHTML(preds) {
 }
 
 /* ---------- UI prefs ---------- */
-const ui = { filter: 'open', window: 'cum' };
+const ui = { filter: 'open', window: 'cum', scope: 'all' };
 try { Object.assign(ui, JSON.parse(localStorage.getItem(KEY + '.ui') || '{}')); } catch (e) {}
 const saveUI = () => { try { localStorage.setItem(KEY + '.ui', JSON.stringify(ui)); } catch (e) {} };
 
 /* ---------- Views ---------- */
 const ICON = {
-  back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>',
-  more: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>',
-  edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg>',
   close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  chevron: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>',
 };
 
+const TABS = { home: 'Prediction Tracker', predictions: 'Predictions', scores: 'Scores', more: 'More' };
+const VIEWS = { home: homeHTML, predictions: predictionsHTML, scores: scoresHTML, more: moreHTML };
+let tab = null;
+const scrollPos = {};
+
 function route() {
-  const m = location.hash.match(/^#\/c\/(.+)$/);
-  const catId = m && decodeURIComponent(m[1]);
-  if (catId && !catById(catId)) { location.hash = '#/'; return; }
-  render(catId || null);
+  const legacy = location.hash.match(/^#\/c\/(.+)$/);
+  if (legacy) { ui.scope = decodeURIComponent(legacy[1]); saveUI(); location.replace('#/scores'); return; }
+  const want = (location.hash.match(/^#\/(\w+)/) || [])[1];
+  const next = TABS[want] ? want : 'home';
+  if (next === tab) { render(); return; }
+  if (tab) scrollPos[tab] = window.scrollY;
+  tab = next;
+  render();
+  window.scrollTo(0, scrollPos[tab] || 0);
 }
 
-let currentCat = null;
-function render(catId = currentCat) {
-  currentCat = catId;
-  const app = $('#app'), top = $('#topbar');
-  $('#fab-label').textContent = state.categories.length ? 'Prediction' : 'Category';
-  if (!catId) {
-    top.innerHTML = `<h1>Prediction Tracker</h1><button class="icon-btn" data-act="menu" aria-label="Menu">${ICON.more}</button>`;
-    app.innerHTML = homeHTML();
-  } else {
-    const c = catById(catId);
-    top.innerHTML = `<a class="icon-btn" href="#/" aria-label="Back">${ICON.back}</a>
-      <h1><span class="pill" style="--cat:${c.color};background:none;padding:0 6px 0 0"><span class="dot" style="width:12px;height:12px"></span></span>${esc(c.name)}</h1>
-      <button class="icon-btn" data-act="edit-cat" data-id="${c.id}" aria-label="Edit category">${ICON.edit}</button>`;
-    app.innerHTML = categoryHTML(c);
-  }
+function render() {
+  if (ui.scope !== 'all' && !catById(ui.scope)) ui.scope = 'all';
+  $('#topbar').innerHTML = `<h1>${TABS[tab]}</h1>`;
+  $('#app').innerHTML = VIEWS[tab]();
+  document.querySelectorAll('.tab[data-tab]').forEach(a => {
+    const on = a.dataset.tab === tab;
+    a.classList.toggle('on', on);
+    if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  });
+}
+
+const scopedPreds = () => ui.scope === 'all' ? state.predictions : predsIn(ui.scope);
+
+function scopeChips() {
+  const items = [['all', 'All', null], ...state.categories.map(c => [c.id, c.name, c.color])];
+  return `<div class="chips" role="group" aria-label="Category">${items.map(([id, name, color]) =>
+    `<button class="chip${ui.scope === id ? ' on' : ''}" data-act="scope" data-v="${esc(id)}">${color ? `<span class="dot" style="background:${color}"></span>` : ''}${esc(name)}</button>`).join('')}</div>`;
+}
+
+function onboardingHTML() {
+  return `<div class="card empty">
+    <h2 style="margin:0;font-size:20px">Track how good your predictions are</h2>
+    <p>Start by creating a category — e.g. “Work”, “Sports”, “Politics”, “Personal”.</p>
+    <button class="btn primary" data-act="new-cat">Create a category</button>
+    ${helpHTML()}
+  </div>`;
+}
+
+function miniScores(s, { skill = true } = {}) {
+  if (!s) return `<div class="mini"><span>Scores appear after ${SHOW_N} resolved predictions.</span></div>`;
+  return `<div class="mini${s.n < MIN_N ? ' low' : ''}">
+    ${skill ? `<span>Skill <b>${fmtSkill(s.skill)}</b></span>` : ''}
+    <span>Cal. error <b>${fmtPts(s.calErr)}</b></span>
+    <span>Resolution <b>${fmtPct(s.resolution)}</b></span>
+    <span>Dir. bias <b>${fmtSignedPts(s.dirBias)}</b></span>
+    ${s.n < MIN_N ? `<span>· only ${s.n} scored</span>` : ''}
+  </div>`;
+}
+
+function homeHTML() {
+  if (!state.categories.length) return onboardingHTML();
+  const today = todayISO();
+  const open = state.predictions.filter(isOpen);
+  const due = open.filter(p => p.dueDate && p.dueDate <= today).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const next = open.filter(p => p.dueDate && p.dueDate > today).sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0];
+  const scored = state.predictions.filter(isScored), s = score(scored);
+  const SHOW_DUE = 5;
+  const cats = state.categories.map(c => {
+    const preds = predsIn(c.id);
+    return `<a class="card cat-card" href="#/scores" data-act="scope" data-v="${esc(c.id)}" style="--cat:${c.color}">
+      <div class="row1"><h3>${esc(c.name)}</h3><div class="counts">${preds.length} total · ${preds.filter(isOpen).length} open</div></div>
+      ${miniScores(score(preds.filter(isScored)))}
+    </a>`;
+  }).join('');
+  return `
+    <a class="card summary" href="#/scores" data-act="scope" data-v="all">
+      <div class="summary-top">
+        <div><div class="label">Overall skill</div><div class="big${s && s.n < MIN_N ? ' low' : ''}" style="color:${!s || s.skill == null || s.n < MIN_N ? 'inherit' : s.skill >= 0 ? 'var(--good)' : 'var(--bad)'}">${s ? fmtSkill(s.skill) : '—'}</div></div>
+        <div class="counts">${state.predictions.length} predictions<br>${open.length} open · ${scored.length} scored</div>
+      </div>
+      ${miniScores(s, { skill: false })}
+    </a>
+
+    <div class="section-title"><h2>To resolve</h2>${due.length > SHOW_DUE ? `<a class="btn small" href="#/predictions" data-act="scope" data-v="all" data-filter="open">See all ${due.length}</a>` : ''}</div>
+    ${due.length ? `<div class="pred-list">${due.slice(0, SHOW_DUE).map(p => predHTML(p, true)).join('')}</div>`
+      : `<div class="card notice">Nothing is past its resolve-by date.${next ? ` Next up: “${esc(next.text)}” on ${fmtDate(next.dueDate)}.` : ''}</div>`}
+
+    <div class="section-title"><h2>Categories</h2><button class="btn small" data-act="new-cat">+ Category</button></div>
+    <div class="cat-list">${cats}</div>
+  `;
+}
+
+function predictionsHTML() {
+  if (!state.categories.length) return onboardingHTML();
+  const preds = scopedPreds();
+  const f = ui.filter;
+  const list = preds
+    .filter(p => f === 'all' || (f === 'open' ? isOpen(p) : !isOpen(p)))
+    .sort((a, b) => {
+      if (f === 'open') {
+        // Soonest due first, undated last, then newest.
+        const da = a.dueDate || '9999', db = b.dueDate || '9999';
+        return da.localeCompare(db) || b.createdAt.localeCompare(a.createdAt);
+      }
+      const ka = a.resolvedAt || a.createdAt, kb = b.resolvedAt || b.createdAt;
+      return kb.localeCompare(ka) || b.ts - a.ts;
+    });
+  const open = preds.filter(isOpen).length;
+  const counts = { open, resolved: preds.length - open, all: preds.length };
+  return `
+    ${scopeChips()}
+    <div class="seg full" role="group" aria-label="Filter">
+      ${['open', 'resolved', 'all'].map(k => `<button data-act="filter" data-v="${k}" class="${f === k ? 'on' : ''}">${k[0].toUpperCase() + k.slice(1)} ${counts[k]}</button>`).join('')}
+    </div>
+    <div class="pred-list">
+      ${list.length ? list.map(p => predHTML(p, ui.scope === 'all')).join('') :
+        `<div class="card empty"><p>${preds.length ? 'Nothing here.' : 'No predictions here yet.'}</p>${preds.length ? '' : '<button class="btn primary" data-act="add">Add a prediction</button>'}</div>`}
+    </div>`;
+}
+
+function scoresHTML() {
+  if (!state.categories.length) return onboardingHTML();
+  const preds = scopedPreds();
+  return `
+    ${scopeChips()}
+    ${statsHTML(preds)}
+    ${preds.some(isScored) ? `<div class="section-title"><h2>Trends</h2>${windowSeg()}</div>${chartsHTML(preds)}` : ''}
+    ${ui.scope === 'all' && state.categories.length > 1 ? `<p class="muted" style="font-size:13px;margin:12px 2px 0">“All” mixes categories of different difficulty, so compare categories by skill score rather than Brier.</p>` : ''}
+    ${helpHTML()}`;
+}
+
+function moreHTML() {
+  const bytes = new Blob([localStorage.getItem(KEY) || '']).size;
+  const cats = state.categories.map(c => `
+    <button class="row" data-act="edit-cat" data-id="${c.id}">
+      <span class="dot" style="background:${c.color}"></span><span class="grow">${esc(c.name)}</span>
+      <span class="muted">${predsIn(c.id).length}</span>${ICON.chevron}
+    </button>`).join('');
+  return `
+    <div class="section-title" style="margin-top:4px"><h2>Categories</h2><button class="btn small" data-act="new-cat">+ New</button></div>
+    ${cats ? `<div class="card list">${cats}</div>` : `<div class="card notice">No categories yet.</div>`}
+    <div class="section-title"><h2>Your data</h2></div>
+    <div class="card list">
+      <button class="row" data-act="export"><span class="grow">Export backup (JSON)</span>${ICON.chevron}</button>
+      <button class="row" data-act="import"><span class="grow">Import backup…</span>${ICON.chevron}</button>
+      <button class="row danger" data-act="erase"><span class="grow">Erase all data</span></button>
+    </div>
+    <p class="muted" style="font-size:13px;margin:8px 2px 0">${state.categories.length} categories · ${state.predictions.length} predictions · ${(bytes / 1024).toFixed(1)} KB stored only in this browser. Nothing is sent anywhere.</p>
+  `;
 }
 
 function tile(label, value, range, sub, { low, color } = {}) {
@@ -530,42 +710,6 @@ function statsHTML(preds) {
           : `needs ${MIN_BIN * 2}+ predictions spread across different probabilities`, { low })}
       ${tile('Direction bias', fmtSignedPts(s.dirBias), range('dirBias', fmtSignedPts), dirWord(s.dirBias), { low })}
     </div>`;
-}
-
-function homeHTML() {
-  if (!state.categories.length) {
-    return `<div class="card empty">
-      <h2 style="margin:0;font-size:20px">Track how good your predictions are</h2>
-      <p>Start by creating a category — e.g. “Work”, “Sports”, “Politics”, “Personal”.</p>
-      <button class="btn primary" data-act="new-cat">Create a category</button>
-      ${helpHTML()}
-    </div>`;
-  }
-  const cats = state.categories.map(c => {
-    const preds = predsIn(c.id), s = score(preds.filter(isScored));
-    const open = preds.filter(isOpen).length;
-    return `<a class="card cat-card" href="#/c/${encodeURIComponent(c.id)}" style="--cat:${c.color}">
-      <div class="row1"><h3>${esc(c.name)}</h3><div class="counts">${preds.length} total · ${open} open</div></div>
-      ${s ? `<div class="mini${s.n < MIN_N ? ' low' : ''}">
-        <span>Skill <b>${fmtSkill(s.skill)}</b></span>
-        <span>Cal. error <b>${fmtPts(s.calErr)}</b></span>
-        <span>Resolution <b>${fmtPct(s.resolution)}</b></span>
-        <span>Dir. bias <b>${fmtSignedPts(s.dirBias)}</b></span>
-        ${s.n < MIN_N ? `<span>· only ${s.n} scored</span>` : ''}
-      </div>` : `<div class="mini"><span>Scores appear after ${SHOW_N} resolved predictions.</span></div>`}
-    </a>`;
-  }).join('');
-  const due = state.predictions.filter(p => isOpen(p) && p.dueDate && p.dueDate <= todayISO()).length;
-  return `
-    ${due ? `<div class="card" style="margin-bottom:14px;display:flex;align-items:center;gap:10px"><span class="pill warn">${due} due</span><span class="muted" style="font-size:14px">prediction${due > 1 ? 's are' : ' is'} past the resolve date — open the category to mark ${due > 1 ? 'them' : 'it'}.</span></div>` : ''}
-    <div class="section-title" style="margin-top:4px"><h2>Overall</h2></div>
-    ${statsHTML(state.predictions)}
-    <div class="section-title"><h2>Categories</h2><button class="btn small" data-act="new-cat">+ Category</button></div>
-    <div class="cat-list">${cats}</div>
-    ${state.predictions.some(isScored) ? `<div class="section-title"><h2>Trends — all categories</h2>${windowSeg()}</div>${chartsHTML(state.predictions)}` : ''}
-    <p class="muted" style="font-size:13px;margin:16px 2px 0">Overall scores mix categories of different difficulty, so compare categories by skill score rather than Brier.</p>
-    ${helpHTML()}
-  `;
 }
 
 const WINDOW = 25;
@@ -627,37 +771,6 @@ function predHTML(p, showCat) {
   </div>`;
 }
 
-function categoryHTML(c) {
-  const preds = predsIn(c.id);
-  const f = ui.filter;
-  const list = preds
-    .filter(p => f === 'all' || (f === 'open' ? isOpen(p) : !isOpen(p)))
-    .sort((a, b) => {
-      if (f === 'open') {
-        // Soonest due first, undated last, then newest.
-        const da = a.dueDate || '9999', db = b.dueDate || '9999';
-        return da.localeCompare(db) || b.createdAt.localeCompare(a.createdAt);
-      }
-      const ka = a.resolvedAt || a.createdAt, kb = b.resolvedAt || b.createdAt;
-      return kb.localeCompare(ka) || b.ts - a.ts;
-    });
-  const open = preds.filter(isOpen).length;
-  const counts = { open, resolved: preds.length - open, all: preds.length };
-  return `
-    ${statsHTML(preds)}
-    <div class="section-title"><h2>Predictions</h2>
-      <div class="seg" role="group" aria-label="Filter">
-        ${['open', 'resolved', 'all'].map(k => `<button data-act="filter" data-v="${k}" class="${f === k ? 'on' : ''}">${k[0].toUpperCase() + k.slice(1)} ${counts[k]}</button>`).join('')}
-      </div>
-    </div>
-    <div class="pred-list">
-      ${list.length ? list.map(p => predHTML(p, false)).join('') :
-        `<div class="card empty"><p>${preds.length ? 'Nothing here.' : 'No predictions in this category yet.'}</p>${preds.length ? '' : '<button class="btn primary" data-act="new-pred">Add a prediction</button>'}</div>`}
-    </div>
-    ${preds.some(isScored) ? `<div class="section-title"><h2>Trends</h2>${windowSeg()}</div>${chartsHTML(preds)}` : ''}
-  `;
-}
-
 function helpHTML() {
   return `<details class="help card" style="margin-top:20px"><summary>How the numbers work</summary><div><dl>
     <dt>Probability</dt><dd>For each prediction you give the chance (1–99%) that it comes true. 30% means you lean “no”. Only predictions resolved as happened / didn’t are scored.</dd>
@@ -670,7 +783,7 @@ function helpHTML() {
     <dt>Ranges and low data</dt><dd>The “90% range” under each number is a bootstrap estimate of how much it could move by luck alone. With fewer than ${MIN_N} scored predictions, numbers are greyed out and charts are dashed. With so little data, calibration error also tends to come out too high.</dd>
     <dt>Locking</dt><dd>A prediction’s statement, probability and “made on” date can be corrected for ${LOCK_MIN} minutes after you add it, then they lock so your record can’t be revised with hindsight. Outcome, category, resolve-by date and notes stay editable. If your view changes, add a new prediction.</dd>
     <dt>Void</dt><dd>Mark a prediction void if it can't be resolved fairly. It's excluded from every score.</dd>
-    <dt>Your data</dt><dd>Everything is stored only in this browser's local storage. Use Menu → Export to back it up or move it to another device.</dd>
+    <dt>Your data</dt><dd>Everything is stored only in this browser's local storage. Use More → Export to back it up or move it to another device.</dd>
   </dl></div></details>`;
 }
 
@@ -706,7 +819,9 @@ function categoryDialog(cat) {
     if (!confirm(`Delete “${cat.name}”${n ? ` and its ${n} prediction${n > 1 ? 's' : ''}` : ''}? This can't be undone.`)) return;
     state.categories = state.categories.filter(c => c.id !== cat.id);
     state.predictions = state.predictions.filter(p => p.categoryId !== cat.id);
-    save(); dlg.close(); location.hash = '#/'; render(null);
+    if (ui.scope === cat.id) { ui.scope = 'all'; saveUI(); }
+    save(); dlg.close(); render();
+    toast(`Deleted “${cat.name}”`);
   };
   form.onsubmit = e => {
     e.preventDefault();
@@ -715,8 +830,8 @@ function categoryDialog(cat) {
     if (cat) { cat.name = name; cat.color = color; save(); dlg.close(); render(); }
     else {
       const c = { id: uid(), name, color, createdAt: todayISO() };
-      state.categories.push(c); save(); dlg.close();
-      location.hash = '#/c/' + encodeURIComponent(c.id);
+      state.categories.push(c); save(); dlg.close(); render();
+      toast(`Created “${name}” — tap + to add a prediction`);
     }
   };
   setTimeout(() => { if (!cat) form.cname.focus(); }, 50);
@@ -793,35 +908,21 @@ function predictionDialog(pred, defaultCat) {
       state.predictions.push(target);
     }
     save(); dlg.close();
-    if (!pred && currentCat && target.categoryId !== currentCat) location.hash = '#/c/' + encodeURIComponent(target.categoryId);
-    else render();
+    render();
+    if (!pred) toast(`Added to ${catById(target.categoryId)?.name || 'predictions'}`);
   };
   setTimeout(() => { if (!pred) form.text.focus(); }, 50);
 }
 
-function menuDialog() {
-  const bytes = new Blob([localStorage.getItem(KEY) || '']).size;
-  const form = openDialog('Menu', `<div class="menu">
-    <button type="button" class="btn" data-m="export">Export backup (JSON)</button>
-    <button type="button" class="btn" data-m="import">Import backup…</button>
-    <button type="button" class="btn danger" data-m="clear">Erase all data</button>
-    <p class="muted" style="font-size:13px;margin:6px 2px 0">${state.categories.length} categories · ${state.predictions.length} predictions · ${(bytes / 1024).toFixed(1)} KB stored locally in this browser. Nothing is sent anywhere.</p>
-  </div>`, '');
-  form.querySelectorAll('[data-m]').forEach(b => b.onclick = () => {
-    const m = b.dataset.m;
-    if (m === 'export') {
-      const url = URL.createObjectURL(new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' }));
-      const a = Object.assign(document.createElement('a'), { href: url, download: `predictions-${todayISO()}.json` });
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      dlg.close();
-    } else if (m === 'import') {
-      dlg.close(); $('#import-file').click();
-    } else if (m === 'clear') {
-      if (!confirm('Erase all categories and predictions from this browser? Export a backup first if you might want them.')) return;
-      state = blank(); save(); dlg.close(); location.hash = '#/'; render(null);
-    }
-  });
+function exportData() {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' }));
+  const a = Object.assign(document.createElement('a'), { href: url, download: `predictions-${todayISO()}.json` });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function eraseData() {
+  if (!confirm('Erase all categories and predictions from this browser? Export a backup first if you might want them.')) return;
+  state = blank(); ui.scope = 'all'; saveUI(); save(); render();
 }
 
 $('#import-file').addEventListener('change', async e => {
@@ -838,7 +939,7 @@ $('#import-file').addEventListener('change', async e => {
       state.categories.push(...data.categories.filter(c => !haveC.has(c.id)));
       state.predictions.push(...data.predictions.filter(p => !haveP.has(p.id)));
     }
-    save(); location.hash = '#/'; render(null);
+    save(); render();
     toast(`Imported ${data.predictions.length} predictions`);
   } catch (err) { toast('Import failed: ' + err.message); }
 });
@@ -857,16 +958,26 @@ function toast(msg, undo) {
 
 /* ---------- Events ---------- */
 document.addEventListener('click', e => {
-  const el = e.target.closest('[data-act]');
+  const el = e.target.closest('[data-act], .tab[data-tab]');
   if (!el || el.closest('dialog')) return;
+  // Tapping the tab you're already on scrolls back to the top.
+  if (el.dataset.tab && el.dataset.tab === tab) { e.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
   const { act, id, v } = el.dataset;
-  if (act === 'menu') menuDialog();
+  if (act === 'add') state.categories.length ? predictionDialog(null, ui.scope !== 'all' ? ui.scope : undefined) : categoryDialog(null);
   else if (act === 'new-cat') categoryDialog(null);
   else if (act === 'edit-cat') categoryDialog(catById(id));
-  else if (act === 'new-pred') predictionDialog(null, currentCat);
   else if (act === 'edit-pred') predictionDialog(state.predictions.find(p => p.id === id));
+  else if (act === 'scope') {
+    // Links (category cards, summary) set the scope and then navigate via their href.
+    ui.scope = v; if (el.dataset.filter) ui.filter = el.dataset.filter; saveUI();
+    delete scrollPos.predictions; delete scrollPos.scores;
+    if (el.tagName !== 'A') render();
+  }
   else if (act === 'filter') { ui.filter = v; saveUI(); render(); }
   else if (act === 'window') { ui.window = v; saveUI(); render(); }
+  else if (act === 'export') exportData();
+  else if (act === 'import') $('#import-file').click();
+  else if (act === 'erase') eraseData();
   else if (act === 'resolve') {
     const p = state.predictions.find(p => p.id === id);
     const prev = { outcome: p.outcome, resolvedAt: p.resolvedAt };
@@ -875,7 +986,6 @@ document.addEventListener('click', e => {
     toast(hit == null ? 'Resolved' : hit ? 'Resolved — you called it ✓' : 'Resolved — missed this one', () => { Object.assign(p, prev); save(); render(); });
   }
 });
-$('#fab').addEventListener('click', () => state.categories.length ? predictionDialog(null, currentCat) : categoryDialog(null));
 window.addEventListener('hashchange', route);
 window.addEventListener('storage', e => { if (e.key === KEY) { state = load(); route(); } });
 route();
