@@ -168,6 +168,7 @@
   .stat.low .value { color: var(--muted); }
   .counts-line { font-size: 14px; color: var(--muted); margin: 0 2px 10px; display: flex; align-items: center; gap: 8px; }
   .counts-line .pill { border: 0; cursor: pointer; }
+  .sheet-value.low { color: var(--muted); }
   .sheet-value { font-size: 44px; font-weight: 750; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
   .kv { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; margin: 0; font-size: 15px; }
   .kv dt { color: var(--muted); }
@@ -765,6 +766,7 @@ const METRICS = {
       ['By chance alone', `~${Math.round(d.luck.typical)} pts, rarely over ${Math.round(d.luck.high)}`],
       ['Verdict', d.s.calErr > d.luck.high ? '<b class="out">More than chance explains</b>' : 'Within what chance produces'],
     ],
+    intro: 'How far your probabilities are from how often things actually happen, in points. Once you have enough predictions, it’s compared with what chance alone would produce, so you can tell a real problem from bad luck.',
     about: d => `How far your probabilities are from how often things actually happen, in points. Even if your probabilities were exactly right, ${d.s.n} predictions would typically show about ${Math.round(d.luck.typical)} pts just by chance, and rarely more than ${Math.round(d.luck.high)}. ${d.s.calErr > d.luck.high
       ? `Yours is higher than that, so you’re probably genuinely ${d.s.overconf > 0 ? 'overconfident' : 'underconfident'}.`
       : 'Yours is within that, so there’s no clear sign of miscalibration yet.'}`,
@@ -792,29 +794,38 @@ function statsHTML(preds) {
   const open = preds.filter(isOpen).length;
   const counts = `<div class="counts-line">${n} scored · ${open} open${d.low
     ? ` <button class="pill warn" data-act="low-data">Low data</button>` : ''}</div>`;
-  if (!d.s) {
-    return counts + `<div class="card notice">Resolve ${SHOW_N - n} more prediction${SHOW_N - n === 1 ? '' : 's'} to see scores. They become reliable at about ${MIN_N}.</div>`;
-  }
+  // Before there's enough data, tiles still show (with "—") so each can be tapped to learn what it means.
+  const needed = SHOW_N - n;
   return counts + `<div class="stats">${Object.entries(METRICS).map(([k, m]) => {
-    const color = m.color?.(d);
-    return `<button class="stat${d.low ? ' low' : ''}" data-act="metric" data-v="${k}">
+    const color = d.s && m.color?.(d);
+    return `<button class="stat${d.low || !d.s ? ' low' : ''}" data-act="metric" data-v="${k}">
       <div class="label">${m.label}<svg class="info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></div>
-      <div class="value"${color && !d.low ? ` style="color:${color}"` : ''}>${m.value(d)}</div>
-      <div class="sub">${m.short(d)}</div>
+      <div class="value"${color && !d.low ? ` style="color:${color}"` : ''}>${d.s ? m.value(d) : '—'}</div>
+      <div class="sub">${d.s ? m.short(d) : `resolve ${needed} more`}</div>
     </button>`;
   }).join('')}</div>`;
 }
 
 function metricDialog(k) {
   const m = METRICS[k], d = scoreDetails(scopedPreds());
-  if (!d.s) return;
+  const scope = ui.scope === 'all' ? 'All categories' : esc(catById(ui.scope)?.name || '');
+  if (!d.s) {
+    const n = d.scored.length, needed = SHOW_N - n;
+    openDialog(m.label, `
+      <div class="sheet-value low">—</div>
+      <div class="muted" style="font-size:14px;margin-top:-8px">${scope}</div>
+      <div class="lock-note">${n} scored so far. Resolve ${needed} more prediction${needed === 1 ? '' : 's'} (happened / didn’t) to see this. It becomes reliable at about ${MIN_N}.</div>
+      <p class="muted" style="font-size:14px;margin:0">${m.intro || m.about}</p>
+    `, '<button type="button" class="btn primary" data-close2>Done</button>');
+    $('[data-close2]', dlg).onclick = () => dlg.close();
+    return;
+  }
   const R = d.R[k];
   const rows = [
     ['Likely range', R ? `${m.fmt(R[0])} to ${m.fmt(R[1])}` : '—'],
     ...m.rows(d),
     ['Based on', `${d.s.n} scored prediction${d.s.n === 1 ? '' : 's'}`],
   ];
-  const scope = ui.scope === 'all' ? 'All categories' : esc(catById(ui.scope)?.name || '');
   openDialog(m.label, `
     <div class="sheet-value"${m.color?.(d) && !d.low ? ` style="color:${m.color(d)}"` : ''}>${m.value(d)}</div>
     <div class="muted" style="font-size:14px;margin-top:-8px">${scope}</div>
