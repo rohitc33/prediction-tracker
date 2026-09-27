@@ -29,10 +29,17 @@ MCB = Brier − mean((x̂ − o)²)     UNC = ō(1 − ō)     DSC = UNC − mea
   so it's comparable across categories.
 - **Calibration error**: `√MCB`, in points. It's the Brier score lost by not using the recalibrated
   probabilities. The tile also shows whether you lean overconfident or underconfident.
+  It also shows a **luck level**: outcomes are simulated for a perfectly calibrated forecaster making
+  your exact predictions (as in CORP's consistency bands), and the tile reports their typical and
+  95th-percentile calibration error. Only a value beyond that is good evidence of real miscalibration.
 - **Resolution**: `DSC / UNC`, 0–100%. It measures how well your probabilities separate what happens
   from what doesn't.
 - **Direction bias**: `mean(f) − ō`, in points. Positive means things happen less often than you predict.
 - **Hit rate**: the share of predictions that went the way you leaned. Shown for reference only.
+
+The **calibration chart** stays a simple banded view (50–59%, 60–69%, …, folded by the side you picked).
+Each band shows a shaded **luck range**: where a perfectly calibrated forecaster's hit rate would land 90%
+of the time with the same predictions. Bands ending outside it are highlighted.
 
 Scores appear after 5 resolved predictions and are greyed out below 20. Each score has a 90% bootstrap range.
 With few predictions the isotonic fit partly fits noise, so calibration error and resolution both read high.

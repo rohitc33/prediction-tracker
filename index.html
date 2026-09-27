@@ -206,7 +206,19 @@
   .calib-bar { position: relative; height: 12px; background: var(--surface-2); border-radius: 6px; }
   .calib-bar .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 6px; background: var(--accent); opacity: .85; }
   .calib-bar .target { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--text); border-radius: 1px; }
+  .calib-bar .luck {
+    position: absolute; top: -5px; bottom: -5px; border-radius: 4px; min-width: 4px;
+    background: color-mix(in srgb, var(--text) 12%, transparent);
+    border: 1px dashed color-mix(in srgb, var(--text) 45%, transparent);
+  }
   .calib-row .n { color: var(--muted); text-align: right; font-size: 13px; }
+  .calib-row .n.out, .out { color: var(--bad); font-weight: 650; }
+  .calib-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--muted); margin-top: 10px; }
+  .calib-legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .calib-legend i { display: inline-block; flex: none; }
+  .lg-fill { width: 16px; height: 8px; border-radius: 4px; background: var(--accent); opacity: .85; }
+  .lg-tick { width: 2px; height: 14px; background: var(--text); }
+  .lg-luck { width: 16px; height: 14px; border-radius: 3px; background: color-mix(in srgb, var(--text) 12%, transparent); border: 1px dashed color-mix(in srgb, var(--text) 45%, transparent); }
 
   details.help { margin-top: 16px; }
   details.help summary { cursor: pointer; color: var(--muted); font-size: 14px; }
@@ -382,15 +394,31 @@ function pav(f, o) {
   return x;
 }
 
+// Miscalibration (CORP MCB): Brier score lost by not using the isotonic recalibration of f.
+function miscalibration(f, o) {
+  const brier = mean(f.map((x, i) => (x - o[i]) ** 2));
+  const x = pav(f, o);
+  const brierC = mean(x.map((v, i) => (v - o[i]) ** 2));
+  return { brier, brierC, mcb: Math.max(0, brier - brierC) }; // clamp float noise
+}
+
+// What calibration error a perfectly calibrated forecaster would show with these same probabilities:
+// simulate outcomes with P(happens) = f and rescore. Mirrors the CORP paper's consistency bands.
+function calErrFromLuck(scored, B = 200) {
+  const f = scored.map(p => p.confidence / 100), rand = seededRandom(scored.length * 104729 + 7);
+  const sims = [];
+  for (let b = 0; b < B; b++) sims.push(Math.sqrt(miscalibration(f, f.map(x => rand() < x ? 1 : 0)).mcb) * 100);
+  sims.sort((a, b) => a - b);
+  return { typical: sims[Math.floor(B * 0.5)], high: sims[Math.ceil(B * 0.95) - 1] };
+}
+
 function score(scored) {
   const N = scored.length;
   if (N < SHOW_N) return null;
   const f = scored.map(p => p.confidence / 100), o = scored.map(p => p.outcome === 'true' ? 1 : 0);
   const obar = mean(o), unc = obar * (1 - obar);
-  const brier = mean(f.map((x, i) => (x - o[i]) ** 2));
-  const x = pav(f, o);
-  const brierC = mean(x.map((v, i) => (v - o[i]) ** 2));
-  const mcb = Math.max(0, brier - brierC), dsc = Math.max(0, unc - brierC); // clamp float noise
+  const { brier, brierC, mcb } = miscalibration(f, o);
+  const dsc = Math.max(0, unc - brierC);
   const dirn = scored.filter(p => p.confidence !== 50);
   const hits = dirn.map(p => (p.confidence > 50) === (p.outcome === 'true') ? 1 : 0);
   return {
@@ -448,12 +476,23 @@ function calibration(preds) {
     const b = buckets.find(b => c >= b.lo && c <= b.hi);
     if (b) b.items.push({ c, hit: (p.confidence > 50) === (p.outcome === 'true') });
   });
-  return buckets.map(b => ({
-    label: b.lo + '–' + b.hi + '%',
-    n: b.items.length,
-    expected: mean(b.items.map(x => x.c)),
-    actual: b.items.length ? mean(b.items.map(x => x.hit ? 100 : 0)) : null,
-  }));
+  return buckets.map(b => {
+    const n = b.items.length;
+    // Where a perfectly calibrated forecaster's hit rate would land 90% of the time with these confidences.
+    let luck = null;
+    if (n) {
+      const rand = seededRandom(n * 31 + b.lo), sims = [];
+      for (let k = 0; k < 400; k++) sims.push(mean(b.items.map(x => rand() < x.c / 100 ? 100 : 0)));
+      sims.sort((x, y) => x - y);
+      luck = [sims[20], sims[379]];
+    }
+    const actual = n ? mean(b.items.map(x => x.hit ? 100 : 0)) : null;
+    return {
+      label: b.lo + '–' + b.hi + '%', n, luck, actual,
+      expected: mean(b.items.map(x => x.c)),
+      outside: luck && (actual < luck[0] || actual > luck[1]),
+    };
+  });
 }
 
 const signed = (v, unit) => { if (v == null) return '—'; const r = Math.round(v); return (r > 0 ? '+' : r < 0 ? '−' : '') + Math.abs(r) + unit; };
@@ -513,12 +552,20 @@ function calibrationHTML(preds) {
   return rows.map(r => `
     <div class="calib-row" style="opacity:${r.n && r.n < SHOW_N ? .55 : 1}">
       <div>${r.label}</div>
-      <div class="calib-bar" title="${r.n ? `You said ~${Math.round(r.expected)}%, right ${Math.round(r.actual)}% of the time` : 'No data'}">
-        ${r.n ? `<div class="fill" style="width:${r.actual}%"></div><div class="target" style="left:calc(${r.expected}% - 1px)"></div>` : ''}
+      <div class="calib-bar" title="${r.n ? `You said ~${Math.round(r.expected)}% and were right ${Math.round(r.actual)}% of the time (${r.n} predictions). A perfectly calibrated forecaster would usually land between ${Math.round(r.luck[0])}% and ${Math.round(r.luck[1])}%.` : 'No data'}">
+        ${r.n ? `<div class="fill" style="width:${r.actual}%"></div>
+          <div class="luck" style="left:${r.luck[0]}%;width:${r.luck[1] - r.luck[0]}%"></div>
+          <div class="target" style="left:calc(${r.expected}% - 1px)"></div>` : ''}
       </div>
-      <div class="n">${r.n ? Math.round(r.actual) + '% · ' + r.n : '—'}</div>
+      <div class="n${r.outside ? ' out' : ''}">${r.n ? Math.round(r.actual) + '% · ' + r.n : '—'}</div>
     </div>`).join('') +
-    `<div class="muted" style="font-size:12.5px;margin-top:6px">Grouped by confidence in the side you picked. Bar = how often you were right; tick = how confident you were. Bar past the tick means underconfident; short of it means overconfident. Faded rows have fewer than ${SHOW_N} predictions.</div>`;
+    `<div class="calib-legend">
+      <span><i class="lg-fill"></i>How often you were right</span>
+      <span><i class="lg-tick"></i>How confident you were</span>
+      <span><i class="lg-luck"></i>Luck range</span>
+    </div>
+    <div class="muted" style="font-size:12.5px;margin-top:6px">Grouped by confidence in the side you picked. A bar short of its tick means overconfident; past it means underconfident. The shaded luck range is where a perfectly calibrated forecaster would land 90% of the time with the same predictions — bars ending inside it are consistent with luck. <b class="out">Red numbers</b> end outside it, so the gap is probably real. Faded rows have fewer than ${SHOW_N} predictions.</div>
+    <div class="muted" style="font-size:12.5px;margin-top:6px">This chart is a simplified view in fixed bands. The calibration error tile uses the exact CORP method, so with few predictions the two can disagree slightly.</div>`;
 }
 
 /* ---------- UI prefs ---------- */
@@ -697,7 +744,7 @@ function statsHTML(preds) {
     return counts + `<div class="card notice">Resolve ${SHOW_N - n} more prediction${SHOW_N - n === 1 ? '' : 's'} (happened / didn’t) to see scores. They become reliable at about ${MIN_N}.</div>`;
   }
   const low = n < MIN_N;
-  const R = ranges(scored);
+  const R = ranges(scored), luck = calErrFromLuck(scored);
   const range = (k, fmt) => R[k] ? `${fmt(R[k][0])} to ${fmt(R[k][1])}` : '';
   return counts +
     (low ? `<div class="card notice">Only ${n} scored — these numbers are mostly noise until about ${MIN_N}. The ranges show how much they could move.</div>` : '') +
@@ -705,7 +752,9 @@ function statsHTML(preds) {
       ${tile('Skill score', fmtSkill(s.skill), range('skill', fmtSkill),
         s.skill == null ? 'needs both outcomes to compute' : `vs. always guessing the base rate · Brier ${fmtBrier(s.brier)} · hit rate ${fmtPct(s.hitRate)}`,
         { low, color: s.skill == null ? null : s.skill >= 0 ? 'var(--good)' : 'var(--bad)' })}
-      ${tile('Calibration error', fmtPts(s.calErr), range('calErr', fmtPts), overconfWord(s.overconf) || 'lower is better', { low })}
+      ${tile('Calibration error', fmtPts(s.calErr), range('calErr', fmtPts),
+        `${overconfWord(s.overconf) || 'lower is better'}<br>Luck alone: ~${Math.round(luck.typical)} pts, up to ${Math.round(luck.high)} — ${s.calErr > luck.high
+          ? '<b class="out">yours is beyond that</b>' : 'yours is within that'}`, { low })}
       ${tile('Resolution', fmtPct(s.resolution), range('resolution', fmtPct),
         s.resolution == null ? 'needs both outcomes to compute' : 'how well you separate what happens from what doesn’t', { low })}
       ${tile('Direction bias', fmtSignedPts(s.dirBias), range('dirBias', fmtSignedPts), dirWord(s.dirBias), { low })}
@@ -776,7 +825,7 @@ function helpHTML() {
     <dt>Probability</dt><dd>For each prediction you give the chance (1–99%) that it comes true. 30% means you lean “no”. Only predictions resolved as happened / didn’t are scored.</dd>
     <dt>Skill score</dt><dd>How much better your Brier score is than always guessing the category’s base rate (how often things in it actually happened). 0% = no better than that; 100% = perfect; negative = worse. Because it adjusts for how predictable a category is, it’s the fair way to compare categories.</dd>
     <dt>Brier score</dt><dd>Mean of (probability − outcome)², where outcome is 1 or 0. 0 is perfect; always saying 50% gets 0.25. It splits exactly into: calibration part − resolution part + uncertainty (how hard the category is).</dd>
-    <dt>Calibration error</dt><dd>The app finds the best “corrected” version of your probabilities: the curve that matches how often things actually happened, with the only rule being that a higher probability from you never maps to a lower corrected one (isotonic regression, the CORP method). Calibration error is how much Brier score you lose by not using those corrected probabilities, shown as a typical gap in points (the square root). 0 = your probabilities already mean what they say. The line below it says which way you tend to miss: overconfident or underconfident.</dd>
+    <dt>Calibration error</dt><dd>The app finds the best “corrected” version of your probabilities: the curve that matches how often things actually happened, with the only rule being that a higher probability from you never maps to a lower corrected one (isotonic regression, the CORP method). Calibration error is how much Brier score you lose by not using those corrected probabilities, shown as a typical gap in points (the square root). 0 = your probabilities already mean what they say. The line below it says which way you tend to miss: overconfident or underconfident.<br><br>Even a perfectly calibrated forecaster shows some calibration error by chance, especially with few predictions. “Luck alone” simulates that forecaster making your exact predictions: the “~” figure is what they’d typically score, and “up to” is their 95th percentile. Only a calibration error beyond that is good evidence of real miscalibration.</dd>
     <dt>Resolution</dt><dd>How much the corrected probabilities improve on always guessing the base rate, as a share of the most that’s possible. 0% = your probabilities carry no information beyond the base rate; 100% = they perfectly separate what happens from what doesn’t. Brier = calibration part − resolution part + uncertainty, exactly.</dd>
     <dt>Direction bias</dt><dd>Your average probability minus how often things actually happened. +10 pts means things happen less often than you predict (e.g. optimism about your own plans); negative means more often.</dd>
     <dt>Hit rate</dt><dd>Share of predictions that went the way you leaned. Shown for reference only — it ignores how confident you were.</dd>
