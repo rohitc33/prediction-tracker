@@ -349,17 +349,38 @@ function confWord(c) {
    Brier        = mean (f − o)². 0 is perfect.
    Uncertainty  = ō (1 − ō), where ō is how often things happened. Depends only on the outcomes.
    Skill        = 1 − Brier / Uncertainty: improvement over always forecasting the base rate ō.
-   Murphy decomposition (forecasts binned in tenths, sparse neighbours merged):
-                  Brier ≈ Reliability − Resolution + Uncertainty
-     Reliability = Σ n_k (f̄_k − ō_k)² / N  → shown as calibration error √Reliability, in points.
-     Resolution  = Σ n_k (ō_k − ō)² / N    → shown as a share of Uncertainty (0–100%).
+   CORP decomposition (Dimitriadis, Gneiting & Jordan, 2021), no binning:
+     Recalibrate the forecasts with isotonic regression (pool-adjacent-violators): x̂ is the
+     best non-decreasing function of f fitted to the outcomes. With Brier_C = mean (x̂ − o)²:
+                  Brier = MCB − DSC + UNC   (exactly; MCB, DSC ≥ 0)
+     MCB (miscalibration)  = Brier − Brier_C  → shown as calibration error √MCB, in points.
+     DSC (discrimination)  = UNC − Brier_C    → shown as resolution, a share of UNC (0–100%).
    Direction bias = mean f − ō: positive means things happen less often than you predict.
    Overconfidence = mean confidence in the side you picked − how often that side was right.
 */
 const MIN_N = 20;  // below this many scored predictions, numbers are flagged as noisy
 const SHOW_N = 5;  // below this, no scores are shown
-const BINS = 10;
-const MIN_BIN = 5; // bins with a single prediction would make resolution look perfect, so merge small ones
+
+// Pool-adjacent-violators: isotonic (non-decreasing) regression of outcomes o on forecasts f.
+// Equal forecasts always share one value. Returns the recalibrated forecast for each input.
+function pav(f, o) {
+  const idx = f.map((_, i) => i).sort((a, b) => f[a] - f[b]);
+  const blocks = []; // { sum, n, start } over positions in idx
+  for (let k = 0; k < idx.length;) {
+    let j = k, sum = 0;
+    while (j < idx.length && f[idx[j]] === f[idx[k]]) sum += o[idx[j++]];
+    blocks.push({ sum, n: j - k, start: k });
+    while (blocks.length > 1) {
+      const b = blocks[blocks.length - 1], a = blocks[blocks.length - 2];
+      if (a.sum / a.n < b.sum / b.n) break;
+      a.sum += b.sum; a.n += b.n; blocks.pop();
+    }
+    k = j;
+  }
+  const x = new Array(f.length);
+  blocks.forEach(b => { for (let k = b.start; k < b.start + b.n; k++) x[idx[k]] = b.sum / b.n; });
+  return x;
+}
 
 function score(scored) {
   const N = scored.length;
@@ -367,36 +388,17 @@ function score(scored) {
   const f = scored.map(p => p.confidence / 100), o = scored.map(p => p.outcome === 'true' ? 1 : 0);
   const obar = mean(o), unc = obar * (1 - obar);
   const brier = mean(f.map((x, i) => (x - o[i]) ** 2));
-  const bins = Array.from({ length: BINS }, () => ({ n: 0, f: 0, o: 0 }));
-  f.forEach((x, i) => { const b = bins[Math.min(BINS - 1, Math.floor(x * BINS))]; b.n++; b.f += x; b.o += o[i]; });
-  // Merge adjacent tenths left to right until each group has MIN_BIN predictions; a short tail joins the last group.
-  const groups = [];
-  let cur = { n: 0, f: 0, o: 0 };
-  bins.forEach(b => {
-    cur.n += b.n; cur.f += b.f; cur.o += b.o;
-    if (cur.n >= MIN_BIN) { groups.push(cur); cur = { n: 0, f: 0, o: 0 }; }
-  });
-  if (cur.n) {
-    const last = groups[groups.length - 1];
-    if (last) { last.n += cur.n; last.f += cur.f; last.o += cur.o; } else groups.push(cur);
-  }
-  let rel = 0, res = 0;
-  groups.forEach(b => {
-    if (!b.n) return;
-    rel += b.n * (b.f / b.n - b.o / b.n) ** 2;
-    res += b.n * (b.o / b.n - obar) ** 2;
-  });
-  rel /= N; res /= N;
+  const x = pav(f, o);
+  const brierC = mean(x.map((v, i) => (v - o[i]) ** 2));
+  const mcb = Math.max(0, brier - brierC), dsc = Math.max(0, unc - brierC); // clamp float noise
   const dirn = scored.filter(p => p.confidence !== 50);
   const hits = dirn.map(p => (p.confidence > 50) === (p.outcome === 'true') ? 1 : 0);
   return {
     n: N,
     brier,
     skill: unc > 0 ? (1 - brier / unc) * 100 : null,
-    calErr: Math.sqrt(rel) * 100,
-    // One group can't separate anything, so resolution is undefined rather than 0.
-    resolution: unc > 0 && groups.length > 1 ? res / unc * 100 : null,
-    baseRate: obar * 100,
+    calErr: Math.sqrt(mcb) * 100,
+    resolution: unc > 0 ? dsc / unc * 100 : null,
     dirBias: (mean(f) - obar) * 100,
     overconf: dirn.length ? mean(dirn.map(p => Math.max(p.confidence, 100 - p.confidence))) - mean(hits) * 100 : null,
     hitRate: dirn.length ? mean(hits) * 100 : null,
@@ -705,9 +707,7 @@ function statsHTML(preds) {
         { low, color: s.skill == null ? null : s.skill >= 0 ? 'var(--good)' : 'var(--bad)' })}
       ${tile('Calibration error', fmtPts(s.calErr), range('calErr', fmtPts), overconfWord(s.overconf) || 'lower is better', { low })}
       ${tile('Resolution', fmtPct(s.resolution), range('resolution', fmtPct),
-        s.resolution != null ? 'how well you separate what happens from what doesn’t'
-          : s.baseRate % 100 === 0 ? 'needs both outcomes to compute'
-          : `needs ${MIN_BIN * 2}+ predictions spread across different probabilities`, { low })}
+        s.resolution == null ? 'needs both outcomes to compute' : 'how well you separate what happens from what doesn’t', { low })}
       ${tile('Direction bias', fmtSignedPts(s.dirBias), range('dirBias', fmtSignedPts), dirWord(s.dirBias), { low })}
     </div>`;
 }
@@ -775,12 +775,12 @@ function helpHTML() {
   return `<details class="help card" style="margin-top:20px"><summary>How the numbers work</summary><div><dl>
     <dt>Probability</dt><dd>For each prediction you give the chance (1–99%) that it comes true. 30% means you lean “no”. Only predictions resolved as happened / didn’t are scored.</dd>
     <dt>Skill score</dt><dd>How much better your Brier score is than always guessing the category’s base rate (how often things in it actually happened). 0% = no better than that; 100% = perfect; negative = worse. Because it adjusts for how predictable a category is, it’s the fair way to compare categories.</dd>
-    <dt>Brier score</dt><dd>Mean of (probability − outcome)², where outcome is 1 or 0. 0 is perfect; always saying 50% gets 0.25. It splits into: Brier ≈ calibration part − resolution part + uncertainty (how hard the category is).</dd>
-    <dt>Calibration error</dt><dd>Your predictions are grouped into tenths (0–9%, 10–19%, … 90–99%), merging neighbouring groups until each has at least ${MIN_BIN}. In each group, compare your average probability with how often those things happened. Calibration error is the typical gap in points (the square root of the Brier calibration part). 0 = your 70%s happen 70% of the time. The line below it says which way you tend to miss: overconfident or underconfident.</dd>
-    <dt>Resolution</dt><dd>How different the outcomes are across those groups: do the things you rate highly actually happen more than the things you rate low? 0% = your probabilities carry no information beyond the base rate; 100% = they perfectly separate what happens from what doesn’t.</dd>
+    <dt>Brier score</dt><dd>Mean of (probability − outcome)², where outcome is 1 or 0. 0 is perfect; always saying 50% gets 0.25. It splits exactly into: calibration part − resolution part + uncertainty (how hard the category is).</dd>
+    <dt>Calibration error</dt><dd>The app finds the best “corrected” version of your probabilities: the curve that matches how often things actually happened, with the only rule being that a higher probability from you never maps to a lower corrected one (isotonic regression, the CORP method). Calibration error is how much Brier score you lose by not using those corrected probabilities, shown as a typical gap in points (the square root). 0 = your probabilities already mean what they say. The line below it says which way you tend to miss: overconfident or underconfident.</dd>
+    <dt>Resolution</dt><dd>How much the corrected probabilities improve on always guessing the base rate, as a share of the most that’s possible. 0% = your probabilities carry no information beyond the base rate; 100% = they perfectly separate what happens from what doesn’t. Brier = calibration part − resolution part + uncertainty, exactly.</dd>
     <dt>Direction bias</dt><dd>Your average probability minus how often things actually happened. +10 pts means things happen less often than you predict (e.g. optimism about your own plans); negative means more often.</dd>
     <dt>Hit rate</dt><dd>Share of predictions that went the way you leaned. Shown for reference only — it ignores how confident you were.</dd>
-    <dt>Ranges and low data</dt><dd>The “90% range” under each number is a bootstrap estimate of how much it could move by luck alone. With fewer than ${MIN_N} scored predictions, numbers are greyed out and charts are dashed. With so little data, calibration error also tends to come out too high.</dd>
+    <dt>Ranges and low data</dt><dd>The “90% range” under each number is a bootstrap estimate of how much it could move by luck alone. With fewer than ${MIN_N} scored predictions, numbers are greyed out and charts are dashed. With so little data, the corrected curve partly fits luck, so calibration error and resolution both tend to come out too high.</dd>
     <dt>Locking</dt><dd>A prediction’s statement, probability and “made on” date can be corrected for ${LOCK_MIN} minutes after you add it, then they lock so your record can’t be revised with hindsight. Outcome, category, resolve-by date and notes stay editable. If your view changes, add a new prediction.</dd>
     <dt>Void</dt><dd>Mark a prediction void if it can't be resolved fairly. It's excluded from every score.</dd>
     <dt>Your data</dt><dd>Everything is stored only in this browser's local storage. Use More → Export to back it up or move it to another device.</dd>

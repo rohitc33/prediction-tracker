@@ -16,23 +16,26 @@ Open `index.html` in any browser (phone or desktop). No server, no build step, a
 
 ## Metrics
 Each prediction has a probability `f` and, once resolved, an outcome `o` (1 = happened, 0 = didn't).
-Scores use the Murphy decomposition of the Brier score:
+Scores use the CORP decomposition of the Brier score (Dimitriadis, Gneiting & Jordan, 2021, *PNAS*).
+Forecasts are recalibrated with isotonic regression (pool-adjacent-violators), giving `x̂`, the best
+non-decreasing mapping from your probabilities to observed frequencies. No binning is involved.
 
 ```
-Brier = mean((f − o)²)  ≈  Reliability − Resolution + Uncertainty
+Brier = mean((f − o)²) = MCB − DSC + UNC        (exact; MCB, DSC ≥ 0)
+MCB = Brier − mean((x̂ − o)²)     UNC = ō(1 − ō)     DSC = UNC − mean((x̂ − o)²)
 ```
 
-- **Skill score**: `1 − Brier / Uncertainty`, where `Uncertainty = ō(1 − ō)` and `ō` is how often things
-  happened. This is the improvement over always guessing the base rate, so it's comparable across categories.
-- **Calibration error**: `√Reliability`, in points. It's the typical gap between your stated probability and
-  how often those things happened, with forecasts grouped into tenths (neighbouring groups are merged until
-  each has at least 5). The tile also shows whether you lean overconfident or underconfident.
-- **Resolution**: `Resolution / Uncertainty`, 0–100%. It measures how well your probabilities separate
-  what happens from what doesn't.
+- **Skill score**: `1 − Brier / UNC`. This is the improvement over always guessing the base rate `ō`,
+  so it's comparable across categories.
+- **Calibration error**: `√MCB`, in points. It's the Brier score lost by not using the recalibrated
+  probabilities. The tile also shows whether you lean overconfident or underconfident.
+- **Resolution**: `DSC / UNC`, 0–100%. It measures how well your probabilities separate what happens
+  from what doesn't.
 - **Direction bias**: `mean(f) − ō`, in points. Positive means things happen less often than you predict.
 - **Hit rate**: the share of predictions that went the way you leaned. Shown for reference only.
 
 Scores appear after 5 resolved predictions and are greyed out below 20. Each score has a 90% bootstrap range.
+With few predictions the isotonic fit partly fits noise, so calibration error and resolution both read high.
 
 ## Locking
 A prediction's statement, probability and "made on" date can be edited for 15 minutes after entry, then they
