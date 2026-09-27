@@ -7,16 +7,34 @@ Open `index.html` in any browser (phone or desktop). No server, no build step, a
 - Categories, each with its own predictions
 - Each prediction has a stated probability (1–99%), an optional resolve-by date and notes
 - Resolve a prediction with one tap (Happened / Didn't), or mark it Void to leave it out of scoring
-- Per-category and overall stats: **accuracy**, **average specificity**, **bias**, Brier score
-- Trend charts (all-time running average or rolling last 10) and a calibration breakdown
+- Per-category and overall scores with 90% bootstrap ranges, plus trend charts and a calibration breakdown
+- Predictions lock 15 minutes after entry, so the record can't be revised with hindsight
 - Export and import a JSON backup (Menu → Export) to move data between devices
 
 ## Metrics
-- **Specificity**: how far from a coin flip you are, `|p − 50| × 2`. 50% → 0%, 90% or 10% → 80%.
-- **Accuracy**: share of resolved, non-50% predictions that went the way you leaned.
-- **Bias**: average confidence in the side you picked, minus how often that side was right.
-  Positive means overconfident; negative means underconfident.
-- **Brier score**: mean of `(p − outcome)²`. Lower is better; always saying 50% gets 0.25.
+Each prediction has a probability `f` and, once resolved, an outcome `o` (1 = happened, 0 = didn't).
+Scores use the Murphy decomposition of the Brier score:
+
+```
+Brier = mean((f − o)²)  ≈  Reliability − Resolution + Uncertainty
+```
+
+- **Skill score**: `1 − Brier / Uncertainty`, where `Uncertainty = ō(1 − ō)` and `ō` is how often things
+  happened. This is the improvement over always guessing the base rate, so it's comparable across categories.
+- **Calibration error**: `√Reliability`, in points. It's the typical gap between your stated probability and
+  how often those things happened, with forecasts grouped into tenths (neighbouring groups are merged until
+  each has at least 5). The tile also shows whether you lean overconfident or underconfident.
+- **Resolution**: `Resolution / Uncertainty`, 0–100%. It measures how well your probabilities separate
+  what happens from what doesn't.
+- **Direction bias**: `mean(f) − ō`, in points. Positive means things happen less often than you predict.
+- **Hit rate**: the share of predictions that went the way you leaned. Shown for reference only.
+
+Scores appear after 5 resolved predictions and are greyed out below 20. Each score has a 90% bootstrap range.
+
+## Locking
+A prediction's statement, probability and "made on" date can be edited for 15 minutes after entry, then they
+lock. Outcome, category, resolve-by date and notes stay editable. Predictions whose "made on" date is earlier
+than the day they were entered show a "logged …" note.
 
 ## Install on your phone
 Host the file anywhere static (for example, GitHub Pages) or open it locally, then use

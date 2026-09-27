@@ -112,6 +112,10 @@
   .stat .label { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
   .stat .value { font-size: 26px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; margin-top: 2px; }
   .stat .sub { font-size: 12.5px; color: var(--muted); }
+  .stat .range { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .stat.low .value { color: var(--muted); }
+  .counts-line { font-size: 14px; color: var(--muted); margin: 0 2px 10px; }
+  .notice { font-size: 14px; color: var(--muted); padding: 12px 14px; margin-bottom: 10px; }
 
   .cat-list { display: grid; gap: 10px; }
   .cat-card { display: block; text-decoration: none; color: inherit; position: relative; overflow: hidden; padding-left: 20px; }
@@ -122,6 +126,7 @@
   .mini { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; font-size: 14px; font-variant-numeric: tabular-nums; }
   .mini span { color: var(--muted); }
   .mini b { font-weight: 650; color: var(--text); }
+  .mini.low b { color: var(--muted); }
 
   .seg { display: inline-flex; background: var(--surface-2); border-radius: 10px; padding: 3px; gap: 2px; }
   .seg button { border: 0; background: transparent; padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 550; color: var(--muted); white-space: nowrap; }
@@ -175,13 +180,15 @@
   .dlg-body { padding: 8px 16px 16px; display: grid; gap: 14px; }
   .dlg-foot { display: flex; gap: 10px; justify-content: flex-end; padding: 0 16px calc(16px + env(safe-area-inset-bottom)); flex-wrap: wrap; }
   .dlg-foot .spacer { flex: 1; }
-  label.field { display: grid; gap: 6px; font-size: 14px; font-weight: 600; }
-  label.field .hint { font-weight: 400; color: var(--muted); font-size: 13px; }
+  .field { display: grid; gap: 6px; font-size: 14px; font-weight: 600; }
+  .field .hint { font-weight: 400; color: var(--muted); font-size: 13px; }
   input[type=text], input[type=date], select, textarea {
     width: 100%; border: 1px solid var(--border); background: var(--bg); border-radius: 10px;
     padding: 10px 12px; font-size: 16px; font-weight: 400;
   }
   textarea { resize: vertical; min-height: 64px; }
+  .locked-val { font-weight: 400; font-size: 16px; padding: 10px 12px; background: var(--surface-2); border-radius: 10px; overflow-wrap: anywhere; white-space: pre-wrap; }
+  .lock-note { font-size: 13px; color: var(--muted); background: var(--surface-2); border-radius: 10px; padding: 8px 12px; }
   input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .conf-display { display: flex; align-items: baseline; justify-content: space-between; }
@@ -251,7 +258,8 @@ const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 
 /* ---------- Helpers ---------- */
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const todayISO = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
+const isoOf = ms => { const d = new Date(ms); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
+const todayISO = () => isoOf(Date.now());
 const dayMs = iso => new Date(iso + 'T12:00:00').getTime();
 const fmtDate = iso => iso ? new Date(iso + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '';
 const fmtShort = ms => new Date(ms).toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
@@ -260,6 +268,11 @@ const catById = id => state.categories.find(c => c.id === id);
 const predsIn = catId => catId ? state.predictions.filter(p => p.categoryId === catId) : state.predictions;
 const isScored = p => p.outcome === 'true' || p.outcome === 'false';
 const isOpen = p => !p.outcome;
+
+// Statement, probability and "made on" date can be fixed for a few minutes after entry, then lock.
+const LOCK_MIN = 15;
+const lockLeftMs = p => p.ts ? LOCK_MIN * 6e4 - (Date.now() - p.ts) : 0;
+const isLocked = p => lockLeftMs(p) <= 0;
 
 function confWord(c) {
   const d = Math.max(c, 100 - c);
@@ -272,49 +285,102 @@ function confWord(c) {
 }
 
 /* ---------- Metrics ----------
-   confidence = stated probability (1–99%) that the statement comes true.
-   Specificity  = how far from a coin flip: |p − 50| × 2  (0% = 50/50, 100% = certain).
-   Accuracy     = share of directional calls (p ≠ 50) that went the way you leaned.
-   Brier        = mean (p − outcome)², 0 is perfect, 0.25 = always saying 50%.
-   Bias         = avg confidence in the side you picked − how often that side was right.
-                  Positive = overconfident, negative = underconfident.
+   Each prediction has a probability f = confidence / 100 that it comes true and, once resolved,
+   an outcome o (1 = happened, 0 = didn't). Only happened/didn't predictions are scored.
+
+   Brier        = mean (f − o)². 0 is perfect.
+   Uncertainty  = ō (1 − ō), where ō is how often things happened. Depends only on the outcomes.
+   Skill        = 1 − Brier / Uncertainty: improvement over always forecasting the base rate ō.
+   Murphy decomposition (forecasts binned in tenths, sparse neighbours merged):
+                  Brier ≈ Reliability − Resolution + Uncertainty
+     Reliability = Σ n_k (f̄_k − ō_k)² / N  → shown as calibration error √Reliability, in points.
+     Resolution  = Σ n_k (ō_k − ō)² / N    → shown as a share of Uncertainty (0–100%).
+   Direction bias = mean f − ō: positive means things happen less often than you predict.
+   Overconfidence = mean confidence in the side you picked − how often that side was right.
 */
-function specOf(p) { return Math.abs(p.confidence - 50) * 2; }
-function metrics(preds) {
-  const live = preds.filter(p => p.outcome !== 'void');
-  const scored = preds.filter(isScored);
-  const directional = scored.filter(p => p.confidence !== 50);
-  const hits = directional.map(p => (p.confidence > 50) === (p.outcome === 'true') ? 1 : 0);
-  const accuracy = directional.length ? mean(hits) * 100 : null;
-  const avgConf = directional.length ? mean(directional.map(p => Math.max(p.confidence, 100 - p.confidence))) : null;
+const MIN_N = 20;  // below this many scored predictions, numbers are flagged as noisy
+const SHOW_N = 5;  // below this, no scores are shown
+const BINS = 10;
+const MIN_BIN = 5; // bins with a single prediction would make resolution look perfect, so merge small ones
+
+function score(scored) {
+  const N = scored.length;
+  if (N < SHOW_N) return null;
+  const f = scored.map(p => p.confidence / 100), o = scored.map(p => p.outcome === 'true' ? 1 : 0);
+  const obar = mean(o), unc = obar * (1 - obar);
+  const brier = mean(f.map((x, i) => (x - o[i]) ** 2));
+  const bins = Array.from({ length: BINS }, () => ({ n: 0, f: 0, o: 0 }));
+  f.forEach((x, i) => { const b = bins[Math.min(BINS - 1, Math.floor(x * BINS))]; b.n++; b.f += x; b.o += o[i]; });
+  // Merge adjacent tenths left to right until each group has MIN_BIN predictions; a short tail joins the last group.
+  const groups = [];
+  let cur = { n: 0, f: 0, o: 0 };
+  bins.forEach(b => {
+    cur.n += b.n; cur.f += b.f; cur.o += b.o;
+    if (cur.n >= MIN_BIN) { groups.push(cur); cur = { n: 0, f: 0, o: 0 }; }
+  });
+  if (cur.n) {
+    const last = groups[groups.length - 1];
+    if (last) { last.n += cur.n; last.f += cur.f; last.o += cur.o; } else groups.push(cur);
+  }
+  let rel = 0, res = 0;
+  groups.forEach(b => {
+    if (!b.n) return;
+    rel += b.n * (b.f / b.n - b.o / b.n) ** 2;
+    res += b.n * (b.o / b.n - obar) ** 2;
+  });
+  rel /= N; res /= N;
+  const dirn = scored.filter(p => p.confidence !== 50);
+  const hits = dirn.map(p => (p.confidence > 50) === (p.outcome === 'true') ? 1 : 0);
   return {
-    total: preds.length,
-    open: preds.filter(isOpen).length,
-    scored: scored.length,
-    specificity: live.length ? mean(live.map(specOf)) : null,
-    accuracy,
-    brier: scored.length ? mean(scored.map(p => (p.confidence / 100 - (p.outcome === 'true' ? 1 : 0)) ** 2)) : null,
-    bias: accuracy == null ? null : avgConf - accuracy,
+    n: N,
+    brier,
+    skill: unc > 0 ? (1 - brier / unc) * 100 : null,
+    calErr: Math.sqrt(rel) * 100,
+    // One group can't separate anything, so resolution is undefined rather than 0.
+    resolution: unc > 0 && groups.length > 1 ? res / unc * 100 : null,
+    baseRate: obar * 100,
+    dirBias: (mean(f) - obar) * 100,
+    overconf: dirn.length ? mean(dirn.map(p => Math.max(p.confidence, 100 - p.confidence))) - mean(hits) * 100 : null,
+    hitRate: dirn.length ? mean(hits) * 100 : null,
   };
 }
 
-// Running series. mode: 'cum' (everything so far) or a number (rolling window).
-function series(preds, mode) {
-  const byCreated = preds.filter(p => p.outcome !== 'void').slice().sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.ts - b.ts);
-  const byResolved = preds.filter(p => isScored(p) && p.confidence !== 50).slice()
-    .sort((a, b) => (a.resolvedAt || '').localeCompare(b.resolvedAt || '') || a.ts - b.ts);
-  const win = (arr, i) => mode === 'cum' ? arr.slice(0, i + 1) : arr.slice(Math.max(0, i + 1 - mode), i + 1);
-  const spec = byCreated.map((p, i) => ({ t: dayMs(p.createdAt), v: mean(win(byCreated, i).map(specOf)), p }));
-  const acc = [], bias = [];
-  byResolved.forEach((p, i) => {
-    const m = metrics(win(byResolved, i));
-    const t = dayMs(p.resolvedAt || p.createdAt);
-    acc.push({ t, v: m.accuracy, p });
-    bias.push({ t, v: m.bias, p });
-  });
-  return { spec, acc, bias };
+// 90% bootstrap intervals. Seeded so the numbers don't jitter between renders.
+const RANGE_KEYS = ['skill', 'calErr', 'resolution', 'dirBias'];
+function seededRandom(seed) {
+  return () => {
+    seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function ranges(scored, B = 400) {
+  const N = scored.length, rand = seededRandom(N * 7919 + 1);
+  const samples = Object.fromEntries(RANGE_KEYS.map(k => [k, []]));
+  for (let b = 0; b < B; b++) {
+    const s = score(Array.from({ length: N }, () => scored[Math.floor(rand() * N)]));
+    if (s) RANGE_KEYS.forEach(k => { if (s[k] != null) samples[k].push(s[k]); });
+  }
+  return Object.fromEntries(RANGE_KEYS.map(k => {
+    const a = samples[k].sort((x, y) => x - y);
+    return [k, a.length >= B / 2 ? [a[Math.floor(a.length * 0.05)], a[Math.ceil(a.length * 0.95) - 1]] : null];
+  }));
 }
 
+// Scores after each resolution, by date resolved. mode: 'cum' (everything so far) or a rolling window size.
+function series(preds, mode) {
+  const byResolved = preds.filter(isScored)
+    .sort((a, b) => (a.resolvedAt || '').localeCompare(b.resolvedAt || '') || a.ts - b.ts);
+  const out = [];
+  byResolved.forEach((p, i) => {
+    const s = score(mode === 'cum' ? byResolved.slice(0, i + 1) : byResolved.slice(Math.max(0, i + 1 - mode), i + 1));
+    if (s) out.push({ t: dayMs(p.resolvedAt || p.createdAt), s, low: s.n < MIN_N, p });
+  });
+  return out;
+}
+
+// Folded by the side you picked, so 30% "yes" counts as 70% "no".
 function calibration(preds) {
   const buckets = [[50, 59], [60, 69], [70, 79], [80, 89], [90, 99]].map(([lo, hi]) => ({ lo, hi, items: [] }));
   preds.filter(p => isScored(p) && p.confidence !== 50).forEach(p => {
@@ -330,43 +396,54 @@ function calibration(preds) {
   }));
 }
 
+const signed = (v, unit) => { if (v == null) return '—'; const r = Math.round(v); return (r > 0 ? '+' : r < 0 ? '−' : '') + Math.abs(r) + unit; };
 const fmtPct = v => v == null ? '—' : Math.round(v) + '%';
-const fmtBias = v => { if (v == null) return '—'; const r = Math.round(v); return (r > 0 ? '+' : r < 0 ? '−' : '±') + Math.abs(r) + ' pts'; };
+const fmtSkill = v => signed(v, '%');
+const fmtPts = v => v == null ? '—' : Math.round(v) + ' pts';
+const fmtSignedPts = v => signed(v, ' pts');
 const fmtBrier = v => v == null ? '—' : v.toFixed(3);
-function biasWord(v) {
-  if (v == null) return 'needs resolved calls';
-  if (Math.abs(v) < 3) return 'well calibrated';
-  return v > 0 ? 'overconfident' : 'underconfident';
+function overconfWord(v) {
+  if (v == null) return '';
+  if (Math.abs(v) < 3) return 'no consistent over- or underconfidence';
+  return (v > 0 ? 'overconfident' : 'underconfident') + ' by ' + Math.abs(Math.round(v)) + ' pts';
+}
+function dirWord(v) {
+  if (v == null) return '';
+  if (Math.abs(v) < 3) return 'no lean toward yes or no';
+  return v > 0 ? 'things happen less often than you predict' : 'things happen more often than you predict';
 }
 
 /* ---------- Charts (inline SVG) ---------- */
-function lineChart(points, { min, max, zero = false, fmt, color = 'var(--accent)' }) {
-  if (points.length < 2) return '<div class="none">Need at least 2 data points to chart a trend.</div>';
+// points: [{ t, v, low, p }]. The low-data prefix (window under MIN_N) is drawn dashed.
+function lineChart(points, { min, max, zero = false, cap = 100, fmt, color = 'var(--accent)' }) {
   const W = 340, H = 150, L = 38, R = 8, T = 8, B = 22;
   const vals = points.map(p => p.v).filter(v => v != null);
-  if (zero) { const m = Math.max(10, ...vals.map(Math.abs)); min = -Math.ceil(m / 10) * 10; max = -min; }
+  if (vals.length < 2) return '<div class="none">Not enough resolved predictions yet.</div>';
+  if (zero) { const m = Math.min(cap, Math.max(10, ...vals.map(Math.abs))); min = -Math.ceil(m / 10) * 10; max = -min; }
+  if (max === 'auto') max = Math.min(cap, Math.max(20, Math.ceil(Math.max(...vals) / 10) * 10));
   const t0 = points[0].t, t1 = points[points.length - 1].t;
   // Points are spaced evenly by order so several on one day don't stack vertically.
   const x = i => L + i / (points.length - 1) * (W - L - R);
-  const y = v => T + (1 - (v - min) / (max - min)) * (H - T - B);
-  const ticks = [min, (min + max) / 2, max];
+  const y = v => T + (1 - (Math.max(min, Math.min(max, v)) - min) / (max - min)) * (H - T - B);
   let g = '';
-  ticks.forEach(v => {
+  [min, (min + max) / 2, max].forEach(v => {
     g += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)" stroke-width="1"/>`;
     g += `<text x="${L - 6}" y="${y(v) + 4}" text-anchor="end" font-size="10" fill="var(--muted)">${fmt(v)}</text>`;
   });
   if (zero) g += `<line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3"/>`;
   g += `<text x="${L}" y="${H - 5}" font-size="10" fill="var(--muted)">${esc(fmtShort(t0))}</text>`;
   g += `<text x="${W - R}" y="${H - 5}" font-size="10" fill="var(--muted)" text-anchor="end">${esc(fmtShort(t1))}</text>`;
-  const pts = points.map((p, i) => p.v == null ? null : [x(i), y(Math.max(min, Math.min(max, p.v)))]).filter(Boolean);
-  const d = pts.map((q, i) => (i ? 'L' : 'M') + q[0].toFixed(1) + ' ' + q[1].toFixed(1)).join(' ');
-  g += `<path d="${d}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>`;
-  if (pts.length <= 60) pts.forEach((q, i) => {
-    const p = points[i];
-    g += `<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="2.8" fill="var(--surface)" stroke="${color}" stroke-width="1.6"><title>${esc(fmtDate(new Date(p.t).toISOString().slice(0, 10)))}: ${esc(fmt(p.v))}\n${esc(p.p.text)}</title></circle>`;
+  const pts = points.map((p, i) => p.v == null ? null : { x: x(i), y: y(p.v), low: p.low, p }).filter(Boolean);
+  const path = a => a.map((q, i) => (i ? 'L' : 'M') + q.x.toFixed(1) + ' ' + q.y.toFixed(1)).join(' ');
+  const firstSolid = pts.findIndex(q => !q.low);
+  if (firstSolid !== 0) g += `<path d="${path(pts.slice(0, firstSolid === -1 ? pts.length : firstSolid + 1))}" fill="none" stroke="${color}" stroke-width="1.8" stroke-dasharray="4 4" opacity=".6"/>`;
+  if (firstSolid !== -1) g += `<path d="${path(pts.slice(firstSolid))}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  if (pts.length <= 60) pts.forEach(q => {
+    const tip = `${fmtDate(isoOf(q.p.t))}: ${fmt(q.p.v)} (${q.p.n} scored)\nLast resolved: ${q.p.p.text}`;
+    g += `<circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="2.8" fill="var(--surface)" stroke="${color}" stroke-width="1.6" opacity="${q.low ? .5 : 1}"><title>${esc(tip)}</title></circle>`;
   });
   const last = pts[pts.length - 1];
-  g += `<circle cx="${last[0]}" cy="${last[1]}" r="4" fill="${color}"/>`;
+  g += `<circle cx="${last.x}" cy="${last.y}" r="4" fill="${color}"/>`;
   return `<svg viewBox="0 0 ${W} ${H}" role="img">${g}</svg>`;
 }
 
@@ -374,14 +451,14 @@ function calibrationHTML(preds) {
   const rows = calibration(preds);
   if (!rows.some(r => r.n)) return '<div class="none">Resolve a few predictions to see calibration.</div>';
   return rows.map(r => `
-    <div class="calib-row">
+    <div class="calib-row" style="opacity:${r.n && r.n < SHOW_N ? .55 : 1}">
       <div>${r.label}</div>
       <div class="calib-bar" title="${r.n ? `You said ~${Math.round(r.expected)}%, right ${Math.round(r.actual)}% of the time` : 'No data'}">
         ${r.n ? `<div class="fill" style="width:${r.actual}%"></div><div class="target" style="left:calc(${r.expected}% - 1px)"></div>` : ''}
       </div>
       <div class="n">${r.n ? Math.round(r.actual) + '% · ' + r.n : '—'}</div>
     </div>`).join('') +
-    `<div class="muted" style="font-size:12.5px;margin-top:6px">Bar = how often you were right. Tick = how confident you were. Bar past the tick means underconfident; short of it means overconfident.</div>`;
+    `<div class="muted" style="font-size:12.5px;margin-top:6px">Grouped by confidence in the side you picked. Bar = how often you were right; tick = how confident you were. Bar past the tick means underconfident; short of it means overconfident. Faded rows have fewer than ${SHOW_N} predictions.</div>`;
 }
 
 /* ---------- UI prefs ---------- */
@@ -421,13 +498,38 @@ function render(catId = currentCat) {
   }
 }
 
-function statsHTML(m) {
-  return `<div class="stats">
-    <div class="stat"><div class="label">Accuracy</div><div class="value">${fmtPct(m.accuracy)}</div><div class="sub">Brier ${fmtBrier(m.brier)}</div></div>
-    <div class="stat"><div class="label">Avg specificity</div><div class="value">${fmtPct(m.specificity)}</div><div class="sub">0% = 50/50 · 100% = certain</div></div>
-    <div class="stat"><div class="label">Bias</div><div class="value" style="color:${m.bias == null || Math.abs(m.bias) < 3 ? 'inherit' : m.bias > 0 ? 'var(--bad)' : 'var(--warn)'}">${fmtBias(m.bias)}</div><div class="sub">${biasWord(m.bias)}</div></div>
-    <div class="stat"><div class="label">Predictions</div><div class="value">${m.total}</div><div class="sub">${m.open} open · ${m.scored} scored</div></div>
+function tile(label, value, range, sub, { low, color } = {}) {
+  return `<div class="stat${low ? ' low' : ''}">
+    <div class="label">${label}</div>
+    <div class="value"${color && !low ? ` style="color:${color}"` : ''}>${value}</div>
+    ${range ? `<div class="range">90% range ${range}</div>` : ''}
+    <div class="sub">${sub}</div>
   </div>`;
+}
+
+function statsHTML(preds) {
+  const scored = preds.filter(isScored), s = score(scored);
+  const open = preds.filter(isOpen).length, n = scored.length;
+  const counts = `<div class="counts-line">${preds.length} prediction${preds.length === 1 ? '' : 's'} · ${open} open · ${n} scored</div>`;
+  if (!s) {
+    return counts + `<div class="card notice">Resolve ${SHOW_N - n} more prediction${SHOW_N - n === 1 ? '' : 's'} (happened / didn’t) to see scores. They become reliable at about ${MIN_N}.</div>`;
+  }
+  const low = n < MIN_N;
+  const R = ranges(scored);
+  const range = (k, fmt) => R[k] ? `${fmt(R[k][0])} to ${fmt(R[k][1])}` : '';
+  return counts +
+    (low ? `<div class="card notice">Only ${n} scored — these numbers are mostly noise until about ${MIN_N}. The ranges show how much they could move.</div>` : '') +
+    `<div class="stats">
+      ${tile('Skill score', fmtSkill(s.skill), range('skill', fmtSkill),
+        s.skill == null ? 'needs both outcomes to compute' : `vs. always guessing the base rate · Brier ${fmtBrier(s.brier)} · hit rate ${fmtPct(s.hitRate)}`,
+        { low, color: s.skill == null ? null : s.skill >= 0 ? 'var(--good)' : 'var(--bad)' })}
+      ${tile('Calibration error', fmtPts(s.calErr), range('calErr', fmtPts), overconfWord(s.overconf) || 'lower is better', { low })}
+      ${tile('Resolution', fmtPct(s.resolution), range('resolution', fmtPct),
+        s.resolution != null ? 'how well you separate what happens from what doesn’t'
+          : s.baseRate % 100 === 0 ? 'needs both outcomes to compute'
+          : `needs ${MIN_BIN * 2}+ predictions spread across different probabilities`, { low })}
+      ${tile('Direction bias', fmtSignedPts(s.dirBias), range('dirBias', fmtSignedPts), dirWord(s.dirBias), { low })}
+    </div>`;
 }
 
 function homeHTML() {
@@ -439,46 +541,59 @@ function homeHTML() {
       ${helpHTML()}
     </div>`;
   }
-  const m = metrics(state.predictions);
   const cats = state.categories.map(c => {
-    const cm = metrics(predsIn(c.id));
+    const preds = predsIn(c.id), s = score(preds.filter(isScored));
+    const open = preds.filter(isOpen).length;
     return `<a class="card cat-card" href="#/c/${encodeURIComponent(c.id)}" style="--cat:${c.color}">
-      <div class="row1"><h3>${esc(c.name)}</h3><div class="counts">${cm.total} total · ${cm.open} open</div></div>
-      <div class="mini">
-        <span>Accuracy <b>${fmtPct(cm.accuracy)}</b></span>
-        <span>Specificity <b>${fmtPct(cm.specificity)}</b></span>
-        <span>Bias <b>${fmtBias(cm.bias)}</b></span>
-      </div>
+      <div class="row1"><h3>${esc(c.name)}</h3><div class="counts">${preds.length} total · ${open} open</div></div>
+      ${s ? `<div class="mini${s.n < MIN_N ? ' low' : ''}">
+        <span>Skill <b>${fmtSkill(s.skill)}</b></span>
+        <span>Cal. error <b>${fmtPts(s.calErr)}</b></span>
+        <span>Resolution <b>${fmtPct(s.resolution)}</b></span>
+        <span>Dir. bias <b>${fmtSignedPts(s.dirBias)}</b></span>
+        ${s.n < MIN_N ? `<span>· only ${s.n} scored</span>` : ''}
+      </div>` : `<div class="mini"><span>Scores appear after ${SHOW_N} resolved predictions.</span></div>`}
     </a>`;
   }).join('');
   const due = state.predictions.filter(p => isOpen(p) && p.dueDate && p.dueDate <= todayISO()).length;
   return `
     ${due ? `<div class="card" style="margin-bottom:14px;display:flex;align-items:center;gap:10px"><span class="pill warn">${due} due</span><span class="muted" style="font-size:14px">prediction${due > 1 ? 's are' : ' is'} past the resolve date — open the category to mark ${due > 1 ? 'them' : 'it'}.</span></div>` : ''}
     <div class="section-title" style="margin-top:4px"><h2>Overall</h2></div>
-    ${statsHTML(m)}
+    ${statsHTML(state.predictions)}
     <div class="section-title"><h2>Categories</h2><button class="btn small" data-act="new-cat">+ Category</button></div>
     <div class="cat-list">${cats}</div>
-    ${state.predictions.length ? `<div class="section-title"><h2>Trends — all categories</h2>${windowSeg()}</div>${chartsHTML(state.predictions)}` : ''}
+    ${state.predictions.some(isScored) ? `<div class="section-title"><h2>Trends — all categories</h2>${windowSeg()}</div>${chartsHTML(state.predictions)}` : ''}
+    <p class="muted" style="font-size:13px;margin:16px 2px 0">Overall scores mix categories of different difficulty, so compare categories by skill score rather than Brier.</p>
     ${helpHTML()}
   `;
 }
 
+const WINDOW = 25;
+const windowSize = () => ui.window === 'cum' ? 'cum' : WINDOW;
 function windowSeg() {
   return `<div class="seg" role="group" aria-label="Averaging window">
     <button data-act="window" data-v="cum" class="${ui.window === 'cum' ? 'on' : ''}">All-time</button>
-    <button data-act="window" data-v="10" class="${ui.window == 10 ? 'on' : ''}">Last 10</button>
+    <button data-act="window" data-v="${WINDOW}" class="${ui.window !== 'cum' ? 'on' : ''}">Last ${WINDOW}</button>
   </div>`;
 }
 
 function chartsHTML(preds) {
-  const s = series(preds, ui.window === 'cum' ? 'cum' : Number(ui.window));
-  const how = ui.window === 'cum' ? 'Running average' : 'Rolling average of last 10';
+  const s = series(preds, windowSize());
+  const pick = k => s.map(x => ({ t: x.t, v: x.s[k], n: x.s.n, low: x.low, p: x.p }));
+  const how = ui.window === 'cum' ? 'All predictions so far' : `Last ${WINDOW} predictions`;
+  const card = (title, desc, chart) => `<div class="card chart-card"><h4>${title}</h4><div class="desc">${desc}</div>${chart}</div>`;
   return `<div class="charts">
-    <div class="card chart-card"><h4>Specificity</h4><div class="desc">${how}, by date made</div>${lineChart(s.spec, { min: 0, max: 100, fmt: fmtPct, color: 'var(--accent)' })}</div>
-    <div class="card chart-card"><h4>Bias</h4><div class="desc">${how}, by date resolved · above 0 = overconfident</div>${lineChart(s.bias, { zero: true, fmt: v => (v > 0 ? '+' : '') + Math.round(v), color: 'var(--bad)' })}</div>
-    <div class="card chart-card"><h4>Accuracy</h4><div class="desc">${how}, by date resolved</div>${lineChart(s.acc, { min: 0, max: 100, fmt: fmtPct, color: 'var(--good)' })}</div>
-    <div class="card chart-card"><h4>Calibration</h4><div class="desc">Grouped by how confident you were</div>${calibrationHTML(preds)}</div>
-  </div>`;
+    ${card('Skill score', `Higher is better · 0 = no better than the base rate`,
+      lineChart(pick('skill'), { zero: true, fmt: v => signed(v, ''), color: 'var(--good)' }))}
+    ${card('Calibration error', `Lower is better · points between your % and reality`,
+      lineChart(pick('calErr'), { min: 0, max: 'auto', fmt: v => Math.round(v), color: 'var(--bad)' }))}
+    ${card('Resolution', `Higher is better · separating yes from no`,
+      lineChart(pick('resolution'), { min: 0, max: 100, fmt: fmtPct, color: 'var(--accent)' }))}
+    ${card('Direction bias', `Above 0 = things happen less often than you predict`,
+      lineChart(pick('dirBias'), { zero: true, fmt: v => signed(v, ''), color: 'var(--warn)' }))}
+    <div class="card chart-card wide"><h4>Calibration</h4><div class="desc">All resolved predictions</div>${calibrationHTML(preds)}</div>
+  </div>
+  <p class="muted" style="font-size:12.5px;margin:8px 2px 0">${how}, recalculated at each resolution date. Dashed = fewer than ${MIN_N} predictions behind the point.</p>`;
 }
 
 function predHTML(p, showCat) {
@@ -500,6 +615,7 @@ function predHTML(p, showCat) {
       ${status}
       ${showCat && c ? `<span class="pill" style="--cat:${c.color}"><span class="dot"></span>${esc(c.name)}</span>` : ''}
       <span>Made ${fmtDate(p.createdAt)}</span>
+      ${p.ts && p.createdAt < isoOf(p.ts) ? `<span title="Entered after the date it says it was made">logged ${fmtDate(isoOf(p.ts))}</span>` : ''}
       ${p.dueDate && isOpen(p) ? `<span>Resolves ${fmtDate(p.dueDate)}</span>` : ''}
       ${p.resolvedAt && !isOpen(p) ? `<span>Resolved ${fmtDate(p.resolvedAt)}</span>` : ''}
     </div>
@@ -513,7 +629,6 @@ function predHTML(p, showCat) {
 
 function categoryHTML(c) {
   const preds = predsIn(c.id);
-  const m = metrics(preds);
   const f = ui.filter;
   const list = preds
     .filter(p => f === 'all' || (f === 'open' ? isOpen(p) : !isOpen(p)))
@@ -526,9 +641,10 @@ function categoryHTML(c) {
       const ka = a.resolvedAt || a.createdAt, kb = b.resolvedAt || b.createdAt;
       return kb.localeCompare(ka) || b.ts - a.ts;
     });
-  const counts = { open: m.open, resolved: preds.length - m.open, all: preds.length };
+  const open = preds.filter(isOpen).length;
+  const counts = { open, resolved: preds.length - open, all: preds.length };
   return `
-    ${statsHTML(m)}
+    ${statsHTML(preds)}
     <div class="section-title"><h2>Predictions</h2>
       <div class="seg" role="group" aria-label="Filter">
         ${['open', 'resolved', 'all'].map(k => `<button data-act="filter" data-v="${k}" class="${f === k ? 'on' : ''}">${k[0].toUpperCase() + k.slice(1)} ${counts[k]}</button>`).join('')}
@@ -538,17 +654,21 @@ function categoryHTML(c) {
       ${list.length ? list.map(p => predHTML(p, false)).join('') :
         `<div class="card empty"><p>${preds.length ? 'Nothing here.' : 'No predictions in this category yet.'}</p>${preds.length ? '' : '<button class="btn primary" data-act="new-pred">Add a prediction</button>'}</div>`}
     </div>
-    ${preds.length ? `<div class="section-title"><h2>Trends</h2>${windowSeg()}</div>${chartsHTML(preds)}` : ''}
+    ${preds.some(isScored) ? `<div class="section-title"><h2>Trends</h2>${windowSeg()}</div>${chartsHTML(preds)}` : ''}
   `;
 }
 
 function helpHTML() {
   return `<details class="help card" style="margin-top:20px"><summary>How the numbers work</summary><div><dl>
-    <dt>Confidence</dt><dd>For each prediction you give the probability (1–99%) that it comes true. 30% means you lean “no”.</dd>
-    <dt>Specificity</dt><dd>How decisive the prediction is: distance from a coin flip. 50% → 0% specificity, 75% or 25% → 50%, 99% or 1% → 98%. Vague hedging lowers it; bold calls raise it.</dd>
-    <dt>Accuracy</dt><dd>Of the resolved predictions where you leaned one way, the share that went that way.</dd>
-    <dt>Bias</dt><dd>Average confidence in the side you picked minus how often that side was right. +10 pts means you're 10 points more sure than you should be (overconfident); negative means underconfident. Near 0 = well calibrated.</dd>
-    <dt>Brier score</dt><dd>Mean of (probability − outcome)². 0 is perfect; 0.25 is what always saying 50% gets you. Lower is better.</dd>
+    <dt>Probability</dt><dd>For each prediction you give the chance (1–99%) that it comes true. 30% means you lean “no”. Only predictions resolved as happened / didn’t are scored.</dd>
+    <dt>Skill score</dt><dd>How much better your Brier score is than always guessing the category’s base rate (how often things in it actually happened). 0% = no better than that; 100% = perfect; negative = worse. Because it adjusts for how predictable a category is, it’s the fair way to compare categories.</dd>
+    <dt>Brier score</dt><dd>Mean of (probability − outcome)², where outcome is 1 or 0. 0 is perfect; always saying 50% gets 0.25. It splits into: Brier ≈ calibration part − resolution part + uncertainty (how hard the category is).</dd>
+    <dt>Calibration error</dt><dd>Your predictions are grouped into tenths (0–9%, 10–19%, … 90–99%), merging neighbouring groups until each has at least ${MIN_BIN}. In each group, compare your average probability with how often those things happened. Calibration error is the typical gap in points (the square root of the Brier calibration part). 0 = your 70%s happen 70% of the time. The line below it says which way you tend to miss: overconfident or underconfident.</dd>
+    <dt>Resolution</dt><dd>How different the outcomes are across those groups: do the things you rate highly actually happen more than the things you rate low? 0% = your probabilities carry no information beyond the base rate; 100% = they perfectly separate what happens from what doesn’t.</dd>
+    <dt>Direction bias</dt><dd>Your average probability minus how often things actually happened. +10 pts means things happen less often than you predict (e.g. optimism about your own plans); negative means more often.</dd>
+    <dt>Hit rate</dt><dd>Share of predictions that went the way you leaned. Shown for reference only — it ignores how confident you were.</dd>
+    <dt>Ranges and low data</dt><dd>The “90% range” under each number is a bootstrap estimate of how much it could move by luck alone. With fewer than ${MIN_N} scored predictions, numbers are greyed out and charts are dashed. With so little data, calibration error also tends to come out too high.</dd>
+    <dt>Locking</dt><dd>A prediction’s statement, probability and “made on” date can be corrected for ${LOCK_MIN} minutes after you add it, then they lock so your record can’t be revised with hindsight. Outcome, category, resolve-by date and notes stay editable. If your view changes, add a new prediction.</dd>
     <dt>Void</dt><dd>Mark a prediction void if it can't be resolved fairly. It's excluded from every score.</dd>
     <dt>Your data</dt><dd>Everything is stored only in this browser's local storage. Use Menu → Export to back it up or move it to another device.</dd>
   </dl></div></details>`;
@@ -604,22 +724,31 @@ function categoryDialog(cat) {
 
 function predictionDialog(pred, defaultCat) {
   const p = pred || { confidence: 70, createdAt: todayISO(), categoryId: defaultCat || state.categories[0]?.id, outcome: null };
+  const locked = !!pred && isLocked(pred);
   let outcome = p.outcome || '';
+  const lockNote = !pred
+    ? `You can fix typos for ${LOCK_MIN} minutes. After that the statement, probability and date lock, so your record can’t be revised with hindsight.`
+    : locked
+      ? `🔒 Statement, probability and date are locked. Changed your mind? Add a new prediction instead.`
+      : `Statement, probability and date can be edited for ${Math.ceil(lockLeftMs(pred) / 6e4)} more min, then they lock.`;
   const form = openDialog(pred ? 'Edit prediction' : 'New prediction', `
+    <div class="lock-note">${lockNote}</div>
+    ${locked ? `<div class="field">Prediction<div class="locked-val">${esc(p.text)}</div></div>` : `
     <label class="field">Prediction<span class="hint">Write it so it can be clearly judged true or false later.</span>
-      <textarea name="text" required rows="2" maxlength="500" placeholder="e.g. The project ships before March 1">${esc(pred?.text)}</textarea></label>
+      <textarea name="text" required rows="2" maxlength="500" placeholder="e.g. The project ships before March 1">${esc(pred?.text)}</textarea></label>`}
     <label class="field">Category<select name="cat">${state.categories.map(c => `<option value="${c.id}" ${c.id === p.categoryId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
-    <div class="field" style="display:grid;gap:6px;font-size:14px;font-weight:600">
+    <div class="field">
       <div class="conf-display"><span>Chance it happens</span><span><span class="big" id="conf-v">${p.confidence}%</span></span></div>
-      <input type="range" name="conf" min="1" max="99" step="1" value="${p.confidence}" aria-label="Confidence">
-      <div class="conf-display"><span class="word" id="conf-w">${confWord(p.confidence)} · specificity ${Math.round(specOf(p))}%</span></div>
-      <div class="quick">${[5, 10, 25, 40, 50, 60, 75, 90, 95].map(v => `<button type="button" data-q="${v}">${v}%</button>`).join('')}</div>
+      ${locked ? '' : `<input type="range" name="conf" min="1" max="99" step="1" value="${p.confidence}" aria-label="Probability">`}
+      <div class="conf-display"><span class="word" id="conf-w">${confWord(p.confidence)}</span></div>
+      ${locked ? '' : `<div class="quick">${[5, 10, 25, 40, 50, 60, 75, 90, 95].map(v => `<button type="button" data-q="${v}">${v}%</button>`).join('')}</div>`}
     </div>
     <div class="row2">
-      <label class="field">Made on<input type="date" name="created" value="${p.createdAt}" required></label>
+      ${locked ? `<div class="field">Made on<div class="locked-val">${fmtDate(p.createdAt)}</div></div>`
+        : `<label class="field">Made on<input type="date" name="created" value="${p.createdAt}" required></label>`}
       <label class="field">Resolves by<input type="date" name="due" value="${p.dueDate || ''}"></label>
     </div>
-    ${pred ? `<div class="field" style="display:grid;gap:6px;font-size:14px;font-weight:600">Outcome
+    ${pred ? `<div class="field">Outcome
       <div class="outcome-choice">${[['', 'Open'], ['true', 'Happened'], ['false', 'Didn’t'], ['void', 'Void']].map(([v, l]) => `<button type="button" data-o="${v}" class="${outcome === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
       <label class="field" id="resolved-wrap" ${outcome ? '' : 'hidden'}>Resolved on<input type="date" name="resolved" value="${p.resolvedAt || todayISO()}"></label>` : ''}
     <label class="field">Notes <span class="hint">Optional — reasoning, sources, resolution criteria.</span><textarea name="notes" rows="2" maxlength="2000">${esc(pred?.notes)}</textarea></label>
@@ -628,9 +757,9 @@ function predictionDialog(pred, defaultCat) {
   const setConf = v => {
     form.conf.value = v;
     $('#conf-v', form).textContent = v + '%';
-    $('#conf-w', form).textContent = confWord(+v) + ' · specificity ' + Math.round(Math.abs(v - 50) * 2) + '%';
+    $('#conf-w', form).textContent = confWord(+v);
   };
-  form.conf.oninput = () => setConf(form.conf.value);
+  if (form.conf) form.conf.oninput = () => setConf(form.conf.value);
   form.querySelectorAll('[data-q]').forEach(b => b.onclick = () => setConf(b.dataset.q));
   form.querySelectorAll('[data-o]').forEach(b => b.onclick = () => {
     outcome = b.dataset.o;
@@ -640,20 +769,23 @@ function predictionDialog(pred, defaultCat) {
   $('[data-close2]', form).onclick = () => dlg.close();
   const del = $('[data-del]', form);
   if (del) del.onclick = () => {
+    if (locked && !confirm('Delete this prediction from your record?\n\nIf it just can’t be judged fairly, mark it Void instead — deleting predictions that went badly makes your scores look better than they are.')) return;
     const idx = state.predictions.indexOf(pred);
     state.predictions.splice(idx, 1); save(); dlg.close(); render();
     toast('Prediction deleted', () => { state.predictions.splice(idx, 0, pred); save(); render(); });
   };
   form.onsubmit = e => {
     e.preventDefault();
-    const text = form.text.value.trim();
-    if (!text) { form.text.focus(); return; }
-    const created = form.created.value || todayISO();
     const target = pred || { id: uid(), ts: Date.now(), outcome: null };
-    Object.assign(target, {
-      text, categoryId: form.cat.value, confidence: +form.conf.value,
-      createdAt: created, dueDate: form.due.value || null, notes: form.notes.value.trim(),
-    });
+    // Re-check: the lock may have kicked in while the dialog was open.
+    if (!pred || !isLocked(pred)) {
+      const text = form.text.value.trim();
+      if (!text) { form.text.focus(); return; }
+      Object.assign(target, { text, confidence: +form.conf.value, createdAt: form.created.value || todayISO() });
+    } else if (!locked) {
+      toast('This prediction locked while the dialog was open — only outcome, category, dates and notes were saved.');
+    }
+    Object.assign(target, { categoryId: form.cat.value, dueDate: form.due.value || null, notes: form.notes.value.trim() });
     if (pred) {
       target.outcome = outcome || null;
       target.resolvedAt = outcome ? (form.resolved.value || todayISO()) : null;
